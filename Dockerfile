@@ -6,7 +6,7 @@ RUN docker-php-ext-install pcntl
 
 ENV BASE_WEB_DIR "/html/"
 
-COPY main.php /joojoo
+COPY server.php /joojoo
 RUN chmod +x /joojoo
 
 EXPOSE 8000

@@ -10,9 +10,9 @@ Inspired by `micro_httpd` (the web server in my TP-Link TD-8811 modem), I built 
 
 **Local:**
 ```bash
-php main.php
+php server.php
 # or set custom web directory
-BASE_WEB_DIR=/path/to/site php main.php
+BASE_WEB_DIR=/path/to/site php server.php
 ```
 
 **Docker (build and run):**
