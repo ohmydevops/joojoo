@@ -1,4 +1,4 @@
-FROM php:8.0-cli-alpine
+FROM php:8.5-cli-alpine
 
 RUN docker-php-ext-configure pcntl --enable-pcntl
 RUN docker-php-ext-install sockets
