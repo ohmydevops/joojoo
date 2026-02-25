@@ -47,4 +47,4 @@ Then, open your browser to view your website.
 - [x] Support concurrency  
 - [x] Support [Common Log Format](https://en.wikipedia.org/wiki/Common_Log_Format)  
 - [x] Use simple worker-mode for handle requests [Prefork in Apache](https://httpd.apache.org/docs/2.4/mod/prefork.html)
-- [ ] Support Keep-alive header  
+- [x] Support Keep-alive header  
