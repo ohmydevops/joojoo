@@ -1,50 +1,91 @@
 # Joojoo | جوجو
 
-**A Tiny Web Server :baby_chick: for Small Tasks**
+A lightweight multi-process web server built with PHP 8, inspired by `micro_httpd`. Implements HTTP/1.1 with keep-alive support.
 
-## The Story Behind joojoo
+## Story Behind
 
-The web server that serves the TP-Link TD-8811 modem settings in my room was called `micro_httpd`. Out of curiosity, I searched for it and found this [repository](https://github.com/socram8888/micro_httpd). The code caught my attention, and I thought it would be a great learning experience to build a simple web server from scratch—similar to `micro_httpd`—to explore new computer science concepts and share what I learn with others.
+Inspired by `micro_httpd` (the web server in my TP-Link TD-8811 modem), I built this to learn HTTP/1.1 from scratch and explore network programming concepts. Started with PHP 8, may rewrite in C++ or Go later.
 
-## A Simple Web Server with PHP
+## Quick Start
 
-In this repository, I aim to build a basic web server step by step following the rules of [Hypertext Transfer Protocol -- HTTP/1.1](https://datatracker.ietf.org/doc/html/rfc2616).  
-Since I primarily work with PHP these days, I decided to implement it first in PHP 8 and later rewrite it in another language (probably C++ or Go).
-
-## How to Run This Web Server?
-
-To run it in a Docker environment, simply use the following command:
-
+**Local:**
+```bash
+php main.php
+# or set custom web directory
+BASE_WEB_DIR=/path/to/site php main.php
 ```
+
+**Docker (build and run):**
+```bash
+# Build image
+docker build -t joojoo .
+
+# Run container
 docker run --name joojoo --init --rm \
-          -v YOUR_WEB_DIR:/html \
-          -p 80:8000 \
-          ohmydevops/joojoo
+  -v /path/to/your/website:/html \
+  -p 80:8000 \
+  joojoo
 ```
 
-Replace `YOUR_WEB_DIR` with the path to your website's root directory.  
-For example, if your static website is located at `/home/user/website`, run:
+## HTTP/1.1 Implementation Roadmap
 
-```
-docker run --name joojoo --init --rm \
-          -v /home/user/website:/html \
-          -p 80:8000 \
-          ohmydevops/joojoo
-```
+**Request Methods:**
+- [x] GET
+- [ ] HEAD
+- [ ] POST
+- [ ] PUT
+- [ ] DELETE
+- [ ] OPTIONS
+- [ ] TRACE
 
-Then, open your browser to view your website.
+**Status Codes:**
+- [x] 200 OK
+- [ ] 206 Partial Content
+- [ ] 301 Moved Permanently
+- [ ] 304 Not Modified
+- [x] 404 Not Found
+- [ ] 400 Bad Request
+- [ ] 403 Forbidden
+- [ ] 405 Method Not Allowed
+- [ ] 500 Internal Server Error
+- [ ] 501 Not Implemented
+- [ ] 503 Service Unavailable
 
-## Roadmap  
+**Request Headers:**
+- [x] Connection (Keep-Alive/Close)
+- [x] Host
+- [ ] Range (for partial content)
+- [ ] If-Modified-Since
+- [ ] If-None-Match
+- [ ] Content-Type
+- [ ] Content-Length
+- [ ] Accept-Encoding
 
-- [x] Serve basic web files (HTML, CSS, JS)  
-- [x] Serve basic static files (images, videos, sounds)  
-- [x] Support 200 status code  
-- [x] Support 404 status code  
-- [x] Support GET method  
-- [x] Handle requests in blocking mode  
-- [x] Dockerized (uploaded to Docker Hub)  
-- [x] Configurable root directory via ENV  
-- [x] Support concurrency  
-- [x] Support [Common Log Format](https://en.wikipedia.org/wiki/Common_Log_Format)  
-- [x] Use simple worker-mode for handle requests [Prefork in Apache](https://httpd.apache.org/docs/2.4/mod/prefork.html)
-- [x] Support Keep-alive header  
+**Response Headers:**
+- [x] Content-Type
+- [x] Content-Length
+- [x] Server
+- [x] Connection
+- [x] Keep-Alive
+- [ ] Last-Modified
+- [ ] ETag
+- [ ] Cache-Control
+- [ ] Content-Encoding (gzip)
+- [ ] Transfer-Encoding (chunked)
+
+**Features:**
+- [x] Multi-process worker model (prefork)
+- [x] Persistent connections (Keep-Alive)
+- [x] Common Log Format
+- [ ] Chunked Transfer Encoding
+- [ ] Compression (gzip)
+- [ ] Range requests (resume downloads)
+- [ ] Conditional requests (caching)
+- [ ] Virtual hosts
+- [ ] HTTPS/TLS support
+
+## Testing
+
+```bash
+./test/keepalive_test.sh
+```  
