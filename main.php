@@ -14,6 +14,9 @@ $default_headers = [
     'Connection' => 'Keep-alive'
 ];
 
+$keep_alive_timeout = 5; // seconds
+$keep_alive_max_requests = 100;
+
 // MIME types
 $content_types = [
     'html' => 'text/html;charset=utf-8',
@@ -52,17 +55,16 @@ function logging(string $message): void
 
 function get_headers_from_request(string $request): array
 {
-    return array_reduce(
-        explode("\r\n", trim($request)),
-        function ($headers, $line) {
-            if (strpos($line, ": ") !== false) {
-                list($key, $value) = explode(": ", $line, 2);
-                $headers[strtolower($key)] = strtolower($value);
-            }
-            return $headers;
-        },
-        []
-    );
+    $lines = explode("\r\n", trim($request));
+    array_shift($lines); // Remove the request line
+    $headers = [];
+    foreach ($lines as $line) {
+        if (strpos($line, ':') !== false) {
+            list($key, $value) = explode(':', $line, 2);
+            $headers[strtolower(trim($key))] = trim($value);
+        }
+    }
+    return $headers;
 }
 
 function get_first_line_http(string $request): string
@@ -70,21 +72,21 @@ function get_first_line_http(string $request): string
     return explode("\r\n", trim($request))[0];
 }
 
-function handle_file_response(string $requested_file, array $content_types): array
+function handle_file_response(string $requested_file, array $content_types, array $default_headers): array
 {
     if (!is_readable($requested_file)) {
-        return handle_not_found_response();
+        return handle_not_found_response($default_headers);
     }
     $body = file_get_contents($requested_file);
-    return ['200', ['Content-Type' => file_mime_detector($requested_file, $content_types)], $body];
+    return ['200', array_merge($default_headers, ['Content-Type' => file_mime_detector($requested_file, $content_types)]), $body];
 }
 
-function handle_not_found_response(): array
+function handle_not_found_response(array $default_headers): array
 {
     $body = '<!DOCTYPE html><html><head><meta charset="UTF-8"><meta content="width=device-width,initial-scale=1.0" name="viewport"><meta content="ie=edge" http-equiv="X-UA-Compatible"><title>Not founded</title></head><body><p>File or directory not founded.</p></body></html>';
     return [
         '404',
-        ['Content-Type' => 'text/html'],
+        array_merge($default_headers, ['Content-Type' => 'text/html']),
         $body
     ];
 }
@@ -93,6 +95,15 @@ function handle_error(string $message, $client_socket): void
 {
     logging("Error: $message");
     socket_close($client_socket);
+}
+
+function should_keep_alive(array $request_headers): bool
+{
+    if(isset($request_headers['connection'])) {
+        return strtolower($request_headers['connection']) === 'keep-alive';
+    }
+    // HTTP/1.1 defaults to keep-alive based on rfc7230
+    return true;
 }
 
 $sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
@@ -110,7 +121,10 @@ if (!socket_set_option($sock, SOL_SOCKET, SO_REUSEADDR, 1)) {
 
 function get_processor_cores_number(): int
 {
-    return (int) shell_exec('nproc');
+    return match (PHP_OS_FAMILY) {
+        'Darwin' =>  (int) shell_exec('sysctl -n hw.ncpu'),
+        default => (int) shell_exec('nproc'),
+    };
 }
 
 $is_bind = socket_bind($sock, HOST, PORT);
@@ -129,56 +143,70 @@ if ($is_listen === false) {
 
 // socket_set_nonblock($sock);
 
-function worker_process(Socket $socket, string $web_dir, array $content_types)
+function worker_process(Socket $socket, string $web_dir, array $content_types, array $default_headers, int $keep_alive_max_requests, int $keep_alive_timeout): void
 {
     while ($client = socket_accept($socket)) {
-        $request = '';
-        while (!str_ends_with($request, "\r\n\r\n")) {
-            $data = socket_read($client, 1024);
-            if ($data === false) {
-                $error = socket_strerror(socket_last_error($client));
-                handle_error("Error reading from socket: $error", $client);
+        socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
+        socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
+        
+        $request_count = 0;
+        $keep_connection = true;
+
+        while($keep_connection && $request_count < $keep_alive_max_requests) {
+            $request = '';
+            while (!str_ends_with($request, "\r\n\r\n")) {
+                $data = @socket_read($client, 1024);
+                if ($data === false || $data === '') {
+                    $keep_connection = false;
+                    break 2;
+                }
+                $request .= $data;
+            }
+
+            if (empty($request)) {
                 break;
             }
-            $request .= $data;
+
+            $request_count++;
+            $request_headers = get_headers_from_request($request);
+            $keep_connection = should_keep_alive($request_headers);
+            $request_path = parse_url(explode(" ", get_first_line_http($request))[1], PHP_URL_PATH);
+
+            if (!is_file($web_dir . $request_path)) {
+                list($code, $headers, $body) = handle_not_found_response($default_headers);
+            } else {
+                list($code, $headers, $body) = handle_file_response(($web_dir . $request_path), $content_types, $default_headers);
+            }
+
+            $client_keep_alive = should_keep_alive($request_headers); 
+            if(!$client_keep_alive || $request_count >= $keep_alive_max_requests) {
+                $headers['Connection'] = 'close';
+                $keep_connection = false;
+            } else {
+                $headers['Connection'] = 'Keep-alive';
+                $headers['Keep-Alive'] = "timeout=$keep_alive_timeout, max=".($keep_alive_max_requests - $request_count);
+            }
+
+            if(!isset($headers['Content-Length'])) {
+                $headers['Content-Length'] = strlen($body);
+            }
+            
+            $header_string = '';
+            foreach ($headers as $k => $v) {
+                $header_string  .= $k . ': ' . $v . "\r\n";
+            }
+            $response = "HTTP/1.1 $code OK\r\n$header_string\r\n$body";
+
+            $bytes_written = @socket_write($client, $response, strlen($response));
+            if ($bytes_written === false) {
+                $error = socket_strerror(socket_last_error($client));
+                handle_error("Error writing to socket: $error", $client);
+            }
+            socket_getpeername($client, $address);
+            logging("socket pid: " . posix_getpid() . " - " . $address . ' - - ' . "[" . date("d/M/Y:H:i:s O") . "]" . ' ' . get_first_line_http($request) . ' ' . $code . ' ' . strlen($body));
+
         }
-
-        if (empty($request)) {
-            continue;
-        }
-
-        // $request_headers = get_headers_from_request($request);
-        $request_path = parse_url(explode(" ", get_first_line_http($request))[1])['path'];
-
-        if (!is_file($web_dir . $request_path)) {
-            list($code, $headers, $body) = handle_not_found_response();
-        } else {
-            list($code, $headers, $body) = handle_file_response($web_dir . $request_path, $content_types);
-        }
-
-        if (!isset($headers['Content-Length'])) {
-            $headers['Content-Length'] = strlen($body);
-        }
-
-        $header = '';
-        foreach ($headers as $k => $v) {
-            $header .= $k . ': ' . $v . "\r\n";
-        }
-        $response = implode("\r\n", array(
-            'HTTP/1.1 ' . $code,
-            $header,
-            $body
-        ));
-
-        $bytes_written = socket_write($client, $response);
-        if ($bytes_written === false) {
-            $error = socket_strerror(socket_last_error($client));
-            handle_error("Error writing to socket: $error", $client);
-        }
-
-        socket_getpeername($client, $address);
         socket_close($client);
-        logging($address . ' - - ' . "[" . date("d/M/Y:H:i:s O") . "]" . ' ' . get_first_line_http($request) . ' ' . $code . ' ' . strlen($body));
     }
 }
 
@@ -190,7 +218,7 @@ for ($i = 0; $i < WORKER_COUNT; $i++) {
     } elseif ($pid) {
         $workers[] = $pid;
     } else {
-        worker_process($sock, $web_dir, $content_types);
+        worker_process($sock, $web_dir, $content_types, $default_headers, $keep_alive_max_requests, $keep_alive_timeout);
         exit(0);
     }
 }
