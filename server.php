@@ -14,7 +14,7 @@ function get_processor_cores_number(): int
 // Server configuration
 define('HOST', '0.0.0.0');
 define('PORT', 8000);
-define('WORKER_COUNT', get_processor_cores_number());
+define('WORKER_COUNT', get_processor_cores_number() * 2);
 define('KEEP_ALIVE_TIMEOUT', 5);
 define('KEEP_ALIVE_MAX_REQUESTS', 100);
 

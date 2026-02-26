@@ -1,8 +1,8 @@
-FROM php:8.5-cli-alpine
+FROM php:8.4-cli-alpine
 
-RUN docker-php-ext-configure pcntl --enable-pcntl
-RUN docker-php-ext-install sockets
-RUN docker-php-ext-install pcntl
+# Install build dependencies for PHP extensions
+RUN apk add --no-cache linux-headers
+RUN docker-php-ext-install sockets pcntl
 
 ENV BASE_WEB_DIR "/html/"
 
