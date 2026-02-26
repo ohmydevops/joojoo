@@ -1,0 +1,25 @@
+services:
+  joojoo:
+    build: ..
+    container_name: joojoo
+    ports:
+      - "8347:8000"
+    volumes:
+      - ../sample-website:/html
+    networks:
+      - benchmark-net
+
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-benchmark
+    ports:
+      - "8591:80"
+    volumes:
+      - ../sample-website:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - benchmark-net
+
+networks:
+  benchmark-net:
+    driver: bridge
