@@ -88,4 +88,20 @@ docker run --name joojoo --init --rm \
 
 ```bash
 ./test/keepalive_test.sh
+```
+
+## Development
+
+**Install dependencies:**
+```bash
+composer install
+```
+
+**Code formatting with Pint:**
+```bash
+# Fix code style
+composer fix
+
+# Check code style (without fixing)
+composer test
 ```  
