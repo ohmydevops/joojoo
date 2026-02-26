@@ -26,10 +26,40 @@ const DEFAULT_RESPONSE_HEADERS = [
     'Connection' => 'Keep-alive',
 ];
 
-const HTTP_STATUS = [
-    '200' => '200 OK',
-    '404' => '404 Not Found',
-];
+enum HTTP_STATUS: string
+{
+    case OK = '200';
+    case NO_CONTENT = '204';
+    case MOVED_PERMANENTLY = '301';
+    case FOUND = '302';
+    case NOT_MODIFIED = '304';
+    case BAD_REQUEST = '400';
+    case FORBIDDEN = '403';
+    case NOT_FOUND = '404';
+    case METHOD_NOT_ALLOWED = '405';
+    case INTERNAL_SERVER_ERROR = '500';
+    case NOT_IMPLEMENTED = '501';
+    case SERVICE_UNAVAILABLE = '503';
+}
+
+function get_status_message(HTTP_STATUS $status): string
+{
+    return match ($status) {
+        HTTP_STATUS::OK => '200 OK',
+        HTTP_STATUS::NO_CONTENT => '204 No Content',
+        HTTP_STATUS::MOVED_PERMANENTLY => '301 Moved Permanently',
+        HTTP_STATUS::FOUND => '302 Found',
+        HTTP_STATUS::NOT_MODIFIED => '304 Not Modified',
+        HTTP_STATUS::BAD_REQUEST => '400 Bad Request',
+        HTTP_STATUS::FORBIDDEN => '403 Forbidden',
+        HTTP_STATUS::NOT_FOUND => '404 Not Found',
+        HTTP_STATUS::METHOD_NOT_ALLOWED => '405 Method Not Allowed',
+        HTTP_STATUS::INTERNAL_SERVER_ERROR => '500 Internal Server Error',
+        HTTP_STATUS::NOT_IMPLEMENTED => '501 Not Implemented',
+        HTTP_STATUS::SERVICE_UNAVAILABLE => '503 Service Unavailable',
+        default => "$status->value Unknown",
+    };
+}
 
 $content_types = [
     'html' => 'text/html;charset=utf-8',
@@ -98,9 +128,10 @@ function file_mime_detector(string $requested_file, array $content_types): strin
     return $content_types[$file_extension] ?? 'application/octet-stream';
 }
 
-function build_http_response(string $status_code, array $headers, string $body): string
+function build_http_response(HTTP_STATUS $status_code, array $headers, string $body): string
 {
-    $status_line = HTTP_STATUS[$status_code] ?? "$status_code Unknown";
+
+    $status_line = get_status_message($status_code);
 
     $header_string = '';
     foreach ($headers as $key => $value) {
@@ -119,7 +150,7 @@ function handle_file_response(string $requested_file, array $content_types): arr
     $body = file_get_contents($requested_file);
     $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => file_mime_detector($requested_file, $content_types)];
 
-    return ['200', $headers, $body];
+    return [HTTP_STATUS::OK, $headers, $body];
 }
 
 function handle_not_found_response(): array
@@ -131,7 +162,7 @@ function handle_not_found_response(): array
 
     $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => 'text/html'];
 
-    return ['404', $headers, $body];
+    return [HTTP_STATUS::NOT_FOUND, $headers, $body];
 }
 
 function create_server_socket(string $host, int $port): Socket|false
@@ -248,7 +279,7 @@ function handle_client_connection(
         socket_getpeername($client, $address);
         $pid = posix_getpid();
         $timestamp = date('d/M/Y:H:i:s O');
-        logging("[$pid] $address - - [$timestamp] \"$first_line\" $status_code " . strlen($body));
+        logging("[$pid] $address - - [$timestamp] \"$first_line\" $status_code->value " . strlen($body));
     }
 }
 
