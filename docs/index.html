@@ -87,7 +87,7 @@ BASE_WEB_DIR=/path/to/site php server.php
 # or set worker count
 WORKERS_COUNT=8 php server.php
 # or use CLI args
-php server.php --base-web-dir /path/to/site --workers-count 8</code></pre>
+php server.php --web-dir /path/to/site --workers-count 8</code></pre>
 
             <h3>Configuration</h3>
             <p><strong>Environment Variables:</strong></p>
@@ -97,7 +97,7 @@ php server.php --base-web-dir /path/to/site --workers-count 8</code></pre>
             </ul>
             <p><strong>CLI Arguments (take precedence over env vars):</strong></p>
             <ul>
-                <li><code>--base-web-dir PATH</code> — Set root directory for serving files</li>
+                <li><code>--web-dir PATH</code> — Set root directory for serving files</li>
                 <li><code>--workers-count N</code> — Set worker process count (must be >= 1)</li>
             </ul>
 

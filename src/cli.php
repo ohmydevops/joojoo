@@ -6,23 +6,23 @@ declare(strict_types=1);
  * Parse CLI arguments into a configuration array.
  *
  * Supports:
- * - --base-web-dir PATH: Set the web root directory
+ * - --web-dir PATH: Set the web root directory
  * - --workers-count N: Set worker process count (must be >= 1)
  *
  * @param array $argv Command-line arguments
  *
- * @return array{base_web_dir: string|null, workers_count: int|null}
+ * @return array{web_dir: string|null, workers_count: int|null}
  */
 function parse_cli_arguments(array $argv): array
 {
     $config = [
-        'base_web_dir' => null,
+        'web_dir' => null,
         'workers_count' => null,
     ];
 
     foreach ($argv as $i => $arg) {
-        if ($arg === '--base-web-dir' && isset($argv[$i + 1])) {
-            $config['base_web_dir'] = $argv[$i + 1];
+        if ($arg === '--web-dir' && isset($argv[$i + 1])) {
+            $config['web_dir'] = $argv[$i + 1];
         }
 
         if ($arg === '--workers-count' && isset($argv[$i + 1])) {
@@ -57,8 +57,8 @@ function load_config(array $argv, ?string $default_web_dir = null): array
 
     // Base web directory: env -> CLI -> default
     $web_dir = $_ENV['BASE_WEB_DIR'] ?? $_SERVER['BASE_WEB_DIR'] ?? null;
-    if ($cli_config['base_web_dir'] !== null) {
-        $web_dir = $cli_config['base_web_dir'];
+    if ($cli_config['web_dir'] !== null) {
+        $web_dir = $cli_config['web_dir'];
     }
     if ($web_dir === null) {
         $web_dir = $default_web_dir ?? __DIR__ . '/../..';

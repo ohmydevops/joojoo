@@ -17,7 +17,7 @@ BASE_WEB_DIR=/path/to/site php server.php
 # or override worker count
 WORKERS_COUNT=8 php server.php
 # or use CLI args
-php server.php --base-web-dir /path/to/site --workers-count 8
+php server.php --web-dir /path/to/site --workers-count 8
 ```
 
 **Docker (build and run):**
@@ -44,7 +44,7 @@ docker run --name joojoo --init --rm \
 
 CLI arguments take precedence over environment variables:
 
-- `--base-web-dir PATH` — Set root directory for serving files
+- `--web-dir PATH` — Set root directory for serving files
 - `--workers-count N` — Set worker process count (must be >= 1)
 
 ### Configuration Precedence
