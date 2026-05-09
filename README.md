@@ -2,6 +2,8 @@
 
 A lightweight multi-process web server built with PHP 8, inspired by `micro_httpd`. Implements HTTP/1.1 with keep-alive support.
 
+A lightweight multi-process web server built with PHP 8, inspired by `micro_httpd`. Implements HTTP/1.1 with keep-alive support.
+
 ## Story Behind
 
 Inspired by `micro_httpd` (the web server in my TP-Link TD-8811 modem), I built this to learn HTTP/1.1 from scratch and explore network programming concepts. Started with PHP 8, may rewrite in C++ or Go later.
@@ -29,7 +31,9 @@ docker run --name joojoo --init --rm \
   joojoo
 ```
 
-## HTTP/1.1 Implementation Roadmap
+<!-- markdownlint-disable MD033 -->
+<details>
+<summary>HTTP/1.1 Implementation Roadmap</summary>
 
 **Request Methods:**
 
@@ -90,6 +94,9 @@ docker run --name joojoo --init --rm \
 - [ ] Conditional requests (caching)
 - [ ] Virtual hosts
 - [ ] HTTPS/TLS support
+
+</details>
+<!-- markdownlint-enable MD033 -->
 
 ## Benchmark
 
