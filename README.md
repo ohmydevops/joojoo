@@ -1,10 +1,10 @@
 # Joojoo | جوجو
 
-A lightweight multi-process web server built with PHP 8, inspired by `micro_httpd`. Implements HTTP/1.1 with keep-alive support.
+A lightweight multi-process static site server built with PHP 8, inspired by `micro_httpd`.
 
 ## Story Behind
 
-Inspired by `micro_httpd` (the web server in my TP-Link TD-8811 modem), I built this to learn HTTP/1.1 from scratch and explore network programming concepts. Started with PHP 8, may rewrite in C++ or Go later.
+Inspired by `micro_httpd` (the web server in my TP-Link TD-8811 modem), this project focuses on serving static files with a small and understandable codebase.
 
 ## Quick Start
 
@@ -29,71 +29,65 @@ docker run --name joojoo --init --rm \
   joojoo
 ```
 
+## Scope
+
+- Static file server only (not a route/controller framework)
+- Supported methods: `GET`, `HEAD`
+- Unsupported methods return `405 Method Not Allowed`
+- Directory requests serve `index.html` when present
+- Basic path traversal protection (`..` and null-byte blocked)
+- Keep-alive connection support with prefork workers
+
+## Static Server Roadmap
+
 <!-- markdownlint-disable MD033 -->
-## HTTP/1.1 Implementation Roadmap
-
 <details>
-<summary>Roadmap</summary>
+<summary>Show roadmap</summary>
 
-**Request Methods:**
+### Core HTTP Behavior
 
-- [x] GET
-- [ ] HEAD
-- [ ] POST
-- [ ] PUT
-- [ ] DELETE
-- [ ] OPTIONS
-- [ ] TRACE
+- [x] `GET` support for static files
+- [x] `HEAD` support with correct `Content-Length` and empty body
+- [x] `405 Method Not Allowed` for unsupported methods
+- [ ] `400 Bad Request` for malformed request lines
 
-**Status Codes:**
+### Static File Resolution
 
-- [x] 200 OK
-- [ ] 206 Partial Content
-- [ ] 301 Moved Permanently
-- [ ] 304 Not Modified
-- [x] 404 Not Found
-- [ ] 400 Bad Request
-- [ ] 403 Forbidden
-- [ ] 405 Method Not Allowed
-- [ ] 500 Internal Server Error
-- [ ] 501 Not Implemented
-- [ ] 503 Service Unavailable
+- [x] Serve files from configured base directory
+- [x] Directory fallback to `index.html`
+- [x] Path traversal guard (`..` / null-byte)
+- [ ] Configurable default index file name
+- [ ] Optional extensionless route fallback (for SPA/static routing)
 
-**Request Headers:**
+### Response Metadata
 
-- [x] Connection (Keep-Alive/Close)
-- [x] Host
-- [ ] Range (for partial content)
-- [ ] If-Modified-Since
-- [ ] If-None-Match
-- [ ] Content-Type
-- [ ] Content-Length
-- [ ] Accept-Encoding
+- [x] `Content-Type` based on file extension map
+- [x] `Content-Length`
+- [x] `Server`, `Connection`, `Keep-Alive`
+- [ ] `Last-Modified`
+- [ ] `ETag`
+- [ ] `Cache-Control`
 
-**Response Headers:**
+### Performance and Transfer
 
-- [x] Content-Type
-- [x] Content-Length
-- [x] Server
-- [x] Connection
-- [x] Keep-Alive
-- [ ] Last-Modified
-- [ ] ETag
-- [ ] Cache-Control
-- [ ] Content-Encoding (gzip)
-- [ ] Transfer-Encoding (chunked)
+- [x] Prefork worker model
+- [x] Keep-alive connection reuse
+- [ ] Gzip/Brotli (prefer precompressed `.gz`/`.br` assets)
+- [ ] `206 Partial Content` (Range requests)
 
-**Features:**
+### Operations
 
-- [x] Multi-process worker model (prefork)
-- [x] Persistent connections (Keep-Alive)
-- [x] Common Log Format
-- [ ] Chunked Transfer Encoding
-- [ ] Compression (gzip)
-- [ ] Range requests (resume downloads)
-- [ ] Conditional requests (caching)
-- [ ] Virtual hosts
-- [ ] HTTPS/TLS support
+- [x] Common request logging
+- [x] Docker image and benchmark scripts
+- [ ] Config file for runtime options (port, workers, keep-alive)
+- [ ] Graceful shutdown and worker restart strategy
+
+### TLS / Certificates
+
+- [ ] HTTPS listener support
+- [ ] Load TLS certificate and private key from config/environment
+- [ ] HTTP to HTTPS redirect mode
+- [ ] Certificate rotation/reload strategy without long downtime
 
 </details>
 <!-- markdownlint-enable MD033 -->
@@ -120,4 +114,4 @@ composer cs:fix
 
 # Check code style (without fixing)
 composer cs:check
-```  
+```
