@@ -22,7 +22,6 @@ define('KEEP_ALIVE_TIMEOUT', 5);
 define('KEEP_ALIVE_MAX_REQUESTS', 100);
 
 $web_dir = getenv('BASE_WEB_DIR') ?: __DIR__;
-$workers = [];
 
 const DEFAULT_RESPONSE_HEADERS = [
     'Server' => 'joojoo',
@@ -387,34 +386,45 @@ function handle_client_connection(
     }
 }
 
-$sock = create_server_socket(HOST, PORT);
-if ($sock === false) {
-    logging('Failed to create server socket: ' . socket_strerror(socket_last_error()));
-    exit(1);
-}
-
-// Fork worker processes
-for ($i = 0; $i < WORKER_COUNT; $i++) {
-    $pid = pcntl_fork();
-
-    if ($pid === -1) {
-        logging('Failed to fork worker process');
+/**
+ * Start the prefork HTTP server.
+ */
+function run_server(string $web_dir, array $content_types): void
+{
+    $workers = [];
+    $sock = create_server_socket(HOST, PORT);
+    if ($sock === false) {
+        logging('Failed to create server socket: ' . socket_strerror(socket_last_error()));
         exit(1);
     }
 
-    if ($pid) {
-        // Parent process
-        $workers[] = $pid;
-    } else {
-        // Child process - become a worker
-        worker_process($sock, $web_dir, $content_types, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT);
-        exit(0);
+    // Fork worker processes
+    for ($i = 0; $i < WORKER_COUNT; $i++) {
+        $pid = pcntl_fork();
+
+        if ($pid === -1) {
+            logging('Failed to fork worker process');
+            exit(1);
+        }
+
+        if ($pid) {
+            // Parent process
+            $workers[] = $pid;
+        } else {
+            // Child process - become a worker
+            worker_process($sock, $web_dir, $content_types, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT);
+            exit(0);
+        }
+    }
+
+    logging('🚀 Server is running on ' . HOST . ':' . PORT . ' with ' . WORKER_COUNT . ' workers');
+
+    // Wait for all workers
+    foreach ($workers as $worker_pid) {
+        pcntl_waitpid($worker_pid, $status);
     }
 }
 
-logging('🚀 Server is running on ' . HOST . ':' . PORT . ' with ' . WORKER_COUNT . ' workers');
-
-// Wait for all workers
-foreach ($workers as $worker_pid) {
-    pcntl_waitpid($worker_pid, $status);
+if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
+    run_server($web_dir, $content_types);
 }
