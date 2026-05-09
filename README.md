@@ -2,8 +2,6 @@
 
 A lightweight multi-process web server built with PHP 8, inspired by `micro_httpd`. Implements HTTP/1.1 with keep-alive support.
 
-A lightweight multi-process web server built with PHP 8, inspired by `micro_httpd`. Implements HTTP/1.1 with keep-alive support.
-
 ## Story Behind
 
 Inspired by `micro_httpd` (the web server in my TP-Link TD-8811 modem), I built this to learn HTTP/1.1 from scratch and explore network programming concepts. Started with PHP 8, may rewrite in C++ or Go later.
