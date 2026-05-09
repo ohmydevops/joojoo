@@ -464,6 +464,9 @@ composer.lock
 
 /wpcs/*
 
+##### PHPUnit
+.phpunit.cache/
+
 ##### SASS
 .sass-cache/
 *.css.map
