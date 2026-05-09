@@ -198,7 +198,7 @@ function handle_not_found_response(): array
 /**
  * Create, configure, bind, and listen on the main TCP server socket.
  */
-function create_server_socket(string $host, int $port): Socket|false
+function create_server_socket(string $host, int $port): \Socket|false
 {
     $sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
     if ($sock === false) {
@@ -226,7 +226,7 @@ function create_server_socket(string $host, int $port): Socket|false
 /**
  * Read bytes from a client until the end of HTTP headers is reached.
  */
-function read_request(Socket $client): string|false
+function read_request(\Socket $client): string|false
 {
     $request = '';
     while (! str_ends_with($request, "\r\n\r\n")) {
@@ -243,7 +243,7 @@ function read_request(Socket $client): string|false
  * Accept clients in a worker process and hand each to the request loop.
  */
 function worker_process(
-    Socket $socket,
+    \Socket $socket,
     string $web_dir,
     array $content_types,
     int $keep_alive_max_requests,
@@ -264,7 +264,7 @@ function worker_process(
  * Process one keep-alive connection and serve multiple sequential requests.
  */
 function handle_client_connection(
-    Socket $client,
+    \Socket $client,
     string $web_dir,
     array $content_types,
     int $keep_alive_max_requests,
