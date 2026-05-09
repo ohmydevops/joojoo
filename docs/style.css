@@ -250,10 +250,8 @@ pre code {
 
 /* Responsive */
 @media (max-width: 640px) {
-    .navbar .container {
-        flex-direction: column;
-        gap: 12px;
-        align-items: flex-start;
+    .nav-links {
+        display: none;
     }
 
     .hero h2 {
