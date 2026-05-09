@@ -2,97 +2,129 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta content="width=device-width, initial-scale=1.0" name="viewport">
-    <title>Joojoo</title>
-    <link href="style.css" rel="stylesheet" type="text/css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Joojoo - Lightweight Static Site Server</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
 </head>
 <body>
-    <main>
+    <nav class="navbar">
         <div class="container">
-            <header>
-                <h1>Joojoo</h1>
-                <p class="subtitle">A minimal PHP web server</p>
-            </header>
-
-            <section class="stats">
-                <div class="stat">Single PHP file</div>
-                <div class="stat">Multi-process</div>
-                <div class="stat">Keep-Alive</div>
-            </section>
-
-            <section class="http-features">
-                <h2>HTTP Features</h2>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Feature</th>
-                            <th>Supported</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>HTTP/1.1</td>
-                            <td class="yes">✓</td>
-                        </tr>
-                        <tr>
-                            <td>Keep-Alive</td>
-                            <td class="yes">✓</td>
-                        </tr>
-                        <tr>
-                            <td>Static Files</td>
-                            <td class="yes">✓</td>
-                        </tr>
-                        <tr>
-                            <td>MIME Types</td>
-                            <td class="yes">✓</td>
-                        </tr>
-                        <tr>
-                            <td>Multi-Process</td>
-                            <td class="yes">✓</td>
-                        </tr>
-                        <tr>
-                            <td>Custom 404</td>
-                            <td class="yes">✓</td>
-                        </tr>
-                        <tr>
-                            <td>HTTPS/TLS</td>
-                            <td class="no">✗</td>
-                        </tr>
-                        <tr>
-                            <td>HTTP/2</td>
-                            <td class="no">✗</td>
-                        </tr>
-                        <tr>
-                            <td>Compression</td>
-                            <td class="no">✗</td>
-                        </tr>
-                        <tr>
-                            <td>CGI/FastCGI</td>
-                            <td class="no">✗</td>
-                        </tr>
-                        <tr>
-                            <td>Virtual Hosts</td>
-                            <td class="no">✗</td>
-                        </tr>
-                        <tr>
-                            <td>Authentication</td>
-                            <td class="no">✗</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </section>
-
-            <section class="test">
-                <button id="testBtn">Test Connection</button>
-                <p class="result" id="result"></p>
-            </section>
-
-            <footer>
-                <p>Made with PHP</p>
-            </footer>
+            <h1 class="logo">Joojoo | جوجو</h1>
+            <ul class="nav-links">
+                <li><a href="#overview">Overview</a></li>
+                <li><a href="#architecture">Architecture</a></li>
+                <li><a href="#quickstart">Quick Start</a></li>
+                <li><a href="#roadmap">Roadmap</a></li>
+            </ul>
         </div>
+    </nav>
+
+    <header class="hero">
+        <div class="container">
+            <h2>Lightweight Multi-Process Static Site Server</h2>
+            <p>Built with PHP 8 • Inspired by micro_httpd • Production Ready</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Overview Section -->
+        <section id="overview" class="section">
+            <h2>Overview</h2>
+            <p>Joojoo is a lightweight static file server built with PHP 8. It focuses on serving static content with minimal overhead, inspired by the web server found in TP-Link modems.</p>
+            <div class="info-box">
+                <strong>What it does:</strong> Serves static files (HTML, CSS, JS, images, etc.) over HTTP/1.1 with keep-alive support and prefork worker concurrency.
+            </div>
+        </section>
+
+        <!-- Architecture Section -->
+        <section id="architecture" class="section">
+            <h2>How It Works</h2>
+            
+            <h3>Architecture</h3>
+            <div class="mermaid">
+graph TD
+    A["Client Request"] --> B["Main Process"]
+    B --> C["Worker Pool<br/>Prefork Model"]
+    C --> D1["Worker 1"]
+    C --> D2["Worker 2"]
+    C --> D3["Worker N"]
+    D1 --> E["Parse Request"]
+    D2 --> E
+    D3 --> E
+    E --> F["Validate Path<br/>Traversal Protection"]
+    F --> G["Resolve File/<br/>Directory"]
+    G --> H["Return HTTP Response"]
+    H --> A
+            </div>
+
+            <h3>Request Flow</h3>
+            <div class="mermaid">
+sequenceDiagram
+    participant Client
+    participant Worker
+    participant FileSystem
+    
+    Client->>Worker: HTTP GET /index.html
+    Worker->>Worker: Parse headers & path
+    Worker->>FileSystem: Check if file exists
+    FileSystem-->>Worker: File found
+    Worker->>Worker: Read Content-Type
+    Worker->>Worker: Set Content-Length
+    Worker-->>Client: HTTP/1.1 200 OK + file
+    Worker->>Worker: Keep-alive: reuse connection
+            </div>
+        </section>
+
+        <!-- Quick Start Section -->
+        <section id="quickstart" class="section">
+            <h2>Quick Start</h2>
+            
+            <h3>Local Usage</h3>
+            <pre><code>php server.php
+# or with custom directory
+BASE_WEB_DIR=/path/to/site php server.php</code></pre>
+
+            <h3>Docker</h3>
+            <pre><code># Build
+docker build -t joojoo .
+
+# Run
+docker run --name joojoo --init --rm \
+  -v /path/to/your/website:/html \
+  -p 80:8000 \
+  joojoo</code></pre>
+        </section>
+
+        <!-- Roadmap Section -->
+        <section id="roadmap" class="section">
+            <h2>Development Roadmap</h2>
+            <div class="mermaid">
+graph LR
+    A["✓ Core<br/>HTTP/1.1"] --> B["✓ Workers<br/>Prefork"]
+    B --> C["✓ Keep-alive<br/>Reuse"]
+    C --> D["→ Compression<br/>gzip/brotli"]
+    D --> E["→ Range<br/>Requests"]
+    E --> F["→ HTTPS<br/>Support"]
+    
+    style A fill:#90EE90
+    style B fill:#90EE90
+    style C fill:#90EE90
+    style D fill:#FFE4B5
+    style E fill:#FFE4B5
+    style F fill:#FFE4B5
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2026 Joojoo Project • <a href="https://github.com">View on GitHub</a></p>
+        </footer>
     </main>
 
-    <script src="index.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'default' });
+        mermaid.contentLoaded();
+    </script>
 </body>
 </html>
