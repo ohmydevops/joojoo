@@ -463,7 +463,7 @@ function handle_client_connection(
 /**
  * Start the prefork HTTP server.
  */
-function run_server(string $web_dir): void
+function run_server(string $web_dir, ?int $worker_count): void
 {
     $workers = [];
     $sock = create_server_socket(HOST, PORT);
@@ -473,7 +473,8 @@ function run_server(string $web_dir): void
     }
 
     // Fork worker processes
-    for ($i = 0; $i < WORKER_COUNT; $i++) {
+    $worker_count = $worker_count ?? WORKER_COUNT;
+    for ($i = 0; $i < $worker_count; $i++) {
         $pid = pcntl_fork();
 
         if ($pid === -1) {
@@ -491,7 +492,14 @@ function run_server(string $web_dir): void
         }
     }
 
-    logging('🚀 Server is running on ' . HOST . ':' . PORT . ' with ' . WORKER_COUNT . ' workers');
+    logging("\033[92m Server is running on " . HOST . ':' . PORT . ' with ' . $worker_count . ' workers\033[0m');
+    logging("\033[92m Serving files from: " . $web_dir . "\033[0m");
+
+    if (! is_dir($web_dir)) {
+        logging('Warning: directory does not exist');
+    } elseif (! is_readable($web_dir)) {
+        logging('Warning: directory is not readable');
+    }
 
     // Wait for all workers
     foreach ($workers as $worker_pid) {

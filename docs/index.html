@@ -83,7 +83,23 @@ sequenceDiagram
             <h3>Local Usage</h3>
             <pre><code>php server.php
 # or with custom directory
-BASE_WEB_DIR=/path/to/site php server.php</code></pre>
+BASE_WEB_DIR=/path/to/site php server.php
+# or set worker count
+WORKERS_COUNT=8 php server.php
+# or use CLI args
+php server.php --base-web-dir /path/to/site --workers-count 8</code></pre>
+
+            <h3>Configuration</h3>
+            <p><strong>Environment Variables:</strong></p>
+            <ul>
+                <li><code>BASE_WEB_DIR</code> — Root directory for serving files (default: current directory)</li>
+                <li><code>WORKERS_COUNT</code> — Number of worker processes (default: CPU cores × 2)</li>
+            </ul>
+            <p><strong>CLI Arguments (take precedence over env vars):</strong></p>
+            <ul>
+                <li><code>--base-web-dir PATH</code> — Set root directory for serving files</li>
+                <li><code>--workers-count N</code> — Set worker process count (must be >= 1)</li>
+            </ul>
 
             <h3>Docker</h3>
             <pre><code># Build

@@ -14,6 +14,10 @@ Inspired by `micro_httpd` (the web server in my TP-Link TD-8811 modem), this pro
 php server.php
 # or set custom web directory
 BASE_WEB_DIR=/path/to/site php server.php
+# or override worker count
+WORKERS_COUNT=8 php server.php
+# or use CLI args
+php server.php --base-web-dir /path/to/site --workers-count 8
 ```
 
 **Docker (build and run):**
@@ -28,6 +32,26 @@ docker run --name joojoo --init --rm \
   -p 80:8000 \
   joojoo
 ```
+
+## Configuration
+
+### Environment Variables
+
+- `BASE_WEB_DIR` — Root directory for serving files (default: current directory)
+- `WORKERS_COUNT` — Number of worker processes (default: CPU cores × 2)
+
+### CLI Arguments
+
+CLI arguments take precedence over environment variables:
+
+- `--base-web-dir PATH` — Set root directory for serving files
+- `--workers-count N` — Set worker process count (must be >= 1)
+
+### Configuration Precedence
+
+1. CLI arguments (highest priority)
+2. Environment variables
+3. Default values (lowest priority)
 
 ## Scope
 
