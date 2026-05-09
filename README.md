@@ -91,10 +91,10 @@ docker run --name joojoo --init --rm \
 - [ ] Virtual hosts
 - [ ] HTTPS/TLS support
 
-## Testing
+## Benchmark
 
 ```bash
-./test/keepalive_test.sh
+./benchmark/benchmark_ab.sh
 ```
 
 ## Development
