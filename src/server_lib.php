@@ -28,17 +28,9 @@ const DEFAULT_RESPONSE_HEADERS = [
 enum HTTP_STATUS: string
 {
     case OK = '200';
-    case NO_CONTENT = '204';
-    case MOVED_PERMANENTLY = '301';
-    case FOUND = '302';
-    case NOT_MODIFIED = '304';
-    case BAD_REQUEST = '400';
     case FORBIDDEN = '403';
     case NOT_FOUND = '404';
     case METHOD_NOT_ALLOWED = '405';
-    case INTERNAL_SERVER_ERROR = '500';
-    case NOT_IMPLEMENTED = '501';
-    case SERVICE_UNAVAILABLE = '503';
 }
 
 /**
@@ -48,17 +40,9 @@ function get_status_message(HTTP_STATUS $status): string
 {
     return match ($status) {
         HTTP_STATUS::OK => '200 OK',
-        HTTP_STATUS::NO_CONTENT => '204 No Content',
-        HTTP_STATUS::MOVED_PERMANENTLY => '301 Moved Permanently',
-        HTTP_STATUS::FOUND => '302 Found',
-        HTTP_STATUS::NOT_MODIFIED => '304 Not Modified',
-        HTTP_STATUS::BAD_REQUEST => '400 Bad Request',
         HTTP_STATUS::FORBIDDEN => '403 Forbidden',
         HTTP_STATUS::NOT_FOUND => '404 Not Found',
         HTTP_STATUS::METHOD_NOT_ALLOWED => '405 Method Not Allowed',
-        HTTP_STATUS::INTERNAL_SERVER_ERROR => '500 Internal Server Error',
-        HTTP_STATUS::NOT_IMPLEMENTED => '501 Not Implemented',
-        HTTP_STATUS::SERVICE_UNAVAILABLE => '503 Service Unavailable',
         default => "$status->value Unknown",
     };
 }
@@ -138,10 +122,12 @@ function get_headers_from_request(string $request): array
 function parse_request_context(string $request): array
 {
     $first_line = get_first_line_http($request);
+    $method = strtoupper(explode(' ', $first_line)[0] ?? 'GET');
     $request_uri = explode(' ', $first_line)[1] ?? '/';
     $request_path = parse_url($request_uri, PHP_URL_PATH) ?? '/';
 
     return [
+        'method' => $method,
         'first_line' => $first_line,
         'headers' => get_headers_from_request($request),
         'request_path' => $request_path,
@@ -153,7 +139,25 @@ function parse_request_context(string $request): array
  */
 function resolve_request_file_path(string $web_dir, string $request_path): string
 {
-    return $web_dir . $request_path;
+    return rtrim($web_dir, '/') . $request_path;
+}
+
+/**
+ * Keep static file serving safe by rejecting traversal and null-byte paths.
+ */
+function is_safe_request_path(string $request_path): bool
+{
+    if (str_contains($request_path, "\0")) {
+        return false;
+    }
+
+    foreach (explode('/', $request_path) as $segment) {
+        if ($segment === '..') {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 /**
@@ -161,11 +165,65 @@ function resolve_request_file_path(string $web_dir, string $request_path): strin
  */
 function route_request_response(string $web_dir, string $request_path, array $content_types): array
 {
+    if (! is_safe_request_path($request_path)) {
+        return handle_forbidden_response();
+    }
+
     $file_path = resolve_request_file_path($web_dir, $request_path);
+
+    if (is_dir($file_path)) {
+        $file_path = rtrim($file_path, '/') . '/index.html';
+    }
 
     return is_file($file_path)
         ? handle_file_response($file_path, $content_types)
         : handle_not_found_response();
+}
+
+/**
+ * Build the HEAD response from an already resolved GET-style response.
+ */
+function build_head_response(array $response): array
+{
+    [$status_code, $headers, $body] = $response;
+    $headers['Content-Length'] = strlen($body);
+
+    return [$status_code, $headers, ''];
+}
+
+/**
+ * Return a 405 response tuple and list supported methods.
+ */
+function handle_method_not_allowed_response(array $allowed_methods): array
+{
+    $body = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        . '<meta content="width=device-width,initial-scale=1.0" name="viewport">'
+        . '<title>Method Not Allowed</title></head><body><h1>405 Method Not Allowed</h1>'
+        . '<p>The requested method is not supported for this resource.</p></body></html>';
+
+    $headers = [
+        ...DEFAULT_RESPONSE_HEADERS,
+        'Content-Type' => 'text/html',
+        'Allow' => implode(', ', $allowed_methods),
+    ];
+
+    return [HTTP_STATUS::METHOD_NOT_ALLOWED, $headers, $body];
+}
+
+/**
+ * Dispatch request handling by HTTP method.
+ */
+function handle_request_by_method(string $web_dir, array $request_context, array $content_types): array
+{
+    $method = $request_context['method'];
+    $request_path = $request_context['request_path'];
+    $resource_response = route_request_response($web_dir, $request_path, $content_types);
+
+    return match ($method) {
+        'GET' => $resource_response,
+        'HEAD' => build_head_response($resource_response),
+        default => handle_method_not_allowed_response(['GET', 'HEAD']),
+    };
 }
 
 /**
@@ -266,6 +324,21 @@ function handle_not_found_response(): array
 }
 
 /**
+ * Return a minimal 403 HTML response tuple for blocked paths.
+ */
+function handle_forbidden_response(): array
+{
+    $body = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        . '<meta content="width=device-width,initial-scale=1.0" name="viewport">'
+        . '<title>Forbidden</title></head><body><h1>403 Forbidden</h1>'
+        . '<p>Access to this resource is not allowed.</p></body></html>';
+
+    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => 'text/html'];
+
+    return [HTTP_STATUS::FORBIDDEN, $headers, $body];
+}
+
+/**
  * Create, configure, bind, and listen on the main TCP server socket.
  */
 function create_server_socket(string $host, int $port): \Socket|false
@@ -354,9 +427,8 @@ function handle_client_connection(
         $request_context = parse_request_context($request);
         $request_headers = $request_context['headers'];
         $first_line = $request_context['first_line'];
-        $request_path = $request_context['request_path'];
 
-        [$status_code, $headers, $body] = route_request_response($web_dir, $request_path, $content_types);
+        [$status_code, $headers, $body] = handle_request_by_method($web_dir, $request_context, $content_types);
 
         // Determine connection persistence
         $client_wants_keepalive = should_keep_alive($request_headers);
@@ -370,7 +442,9 @@ function handle_client_connection(
         $headers = $connection_policy['headers'];
         $keep_connection = $connection_policy['keep_connection'];
 
-        $headers['Content-Length'] = strlen($body);
+        if (! isset($headers['Content-Length'])) {
+            $headers['Content-Length'] = strlen($body);
+        }
 
         // Send response
         $response = build_http_response($status_code, $headers, $body);
@@ -385,7 +459,7 @@ function handle_client_connection(
         socket_getpeername($client, $address);
         $pid = posix_getpid();
         $timestamp = date('d/M/Y:H:i:s O');
-        logging("[$pid] $address - - [$timestamp] \"$first_line\" $status_code->value " . strlen($body));
+        logging("[$pid] $address - - [$timestamp] \"$first_line\" $status_code->value " . $headers['Content-Length']);
     }
 }
 

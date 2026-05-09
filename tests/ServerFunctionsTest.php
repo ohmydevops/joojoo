@@ -35,4 +35,34 @@ final class ServerFunctionsTest extends TestCase
         $this->assertFalse($result['keep_connection']);
         $this->assertSame('close', $result['headers']['Connection']);
     }
+
+    public function test_head_request_returns_empty_body_and_content_length(): void
+    {
+        $requestContext = [
+            'method' => 'HEAD',
+            'request_path' => '/sample-website/index.html',
+        ];
+
+        [$status, $headers, $body] = handle_request_by_method(
+            dirname(__DIR__),
+            $requestContext,
+            get_default_content_types()
+        );
+
+        $this->assertSame(HTTP_STATUS::OK, $status);
+        $this->assertSame('', $body);
+        $this->assertArrayHasKey('Content-Length', $headers);
+        $this->assertGreaterThan(0, (int) $headers['Content-Length']);
+    }
+
+    public function test_path_traversal_returns_forbidden(): void
+    {
+        [$status] = route_request_response(
+            dirname(__DIR__),
+            '/../composer.json',
+            get_default_content_types()
+        );
+
+        $this->assertSame(HTTP_STATUS::FORBIDDEN, $status);
+    }
 }
