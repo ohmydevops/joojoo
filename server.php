@@ -131,6 +131,42 @@ function get_headers_from_request(string $request): array
 }
 
 /**
+ * Parse request metadata needed for routing and connection decisions.
+ */
+function parse_request_context(string $request): array
+{
+    $first_line = get_first_line_http($request);
+    $request_uri = explode(' ', $first_line)[1] ?? '/';
+    $request_path = parse_url($request_uri, PHP_URL_PATH) ?? '/';
+
+    return [
+        'first_line' => $first_line,
+        'headers' => get_headers_from_request($request),
+        'request_path' => $request_path,
+    ];
+}
+
+/**
+ * Build an absolute file path inside the configured web root.
+ */
+function resolve_request_file_path(string $web_dir, string $request_path): string
+{
+    return $web_dir . $request_path;
+}
+
+/**
+ * Route request path to either static file response or not-found response.
+ */
+function route_request_response(string $web_dir, string $request_path, array $content_types): array
+{
+    $file_path = resolve_request_file_path($web_dir, $request_path);
+
+    return is_file($file_path)
+        ? handle_file_response($file_path, $content_types)
+        : handle_not_found_response();
+}
+
+/**
  * Decide whether the client connection should remain persistent.
  */
 function should_keep_alive(array $request_headers): bool
@@ -138,6 +174,38 @@ function should_keep_alive(array $request_headers): bool
     return isset($request_headers['connection'])
         ? strtolower($request_headers['connection']) === 'keep-alive'
         : true; // HTTP/1.1 defaults to keep-alive (RFC 7230)
+}
+
+/**
+ * Apply connection headers and determine whether this connection should close.
+ */
+function apply_connection_policy(
+    array $headers,
+    bool $client_wants_keepalive,
+    int $request_count,
+    int $keep_alive_max_requests,
+    int $keep_alive_timeout
+): array {
+    $max_requests_reached = $request_count >= $keep_alive_max_requests;
+    $should_close = ! $client_wants_keepalive || $max_requests_reached;
+
+    if ($should_close) {
+        return [
+            'headers' => [...$headers, 'Connection' => 'close'],
+            'keep_connection' => false,
+        ];
+    }
+
+    $remaining_requests = $keep_alive_max_requests - $request_count;
+
+    return [
+        'headers' => [
+            ...$headers,
+            'Connection' => 'Keep-Alive',
+            'Keep-Alive' => "timeout=$keep_alive_timeout, max=$remaining_requests",
+        ],
+        'keep_connection' => true,
+    ];
 }
 
 /**
@@ -281,30 +349,24 @@ function handle_client_connection(
         }
 
         $request_count++;
-        $request_headers = get_headers_from_request($request);
-        $first_line = get_first_line_http($request);
+        $request_context = parse_request_context($request);
+        $request_headers = $request_context['headers'];
+        $first_line = $request_context['first_line'];
+        $request_path = $request_context['request_path'];
 
-        // Parse request path
-        $request_uri = explode(' ', $first_line)[1] ?? '/';
-        $request_path = parse_url($request_uri, PHP_URL_PATH) ?? '/';
-
-        // Generate response
-        $file_path = $web_dir . $request_path;
-        [$status_code, $headers, $body] = is_file($file_path)
-            ? handle_file_response($file_path, $content_types)
-            : handle_not_found_response();
+        [$status_code, $headers, $body] = route_request_response($web_dir, $request_path, $content_types);
 
         // Determine connection persistence
         $client_wants_keepalive = should_keep_alive($request_headers);
-        $should_close = ! $client_wants_keepalive || $request_count >= $keep_alive_max_requests;
-
-        if ($should_close) {
-            $headers['Connection'] = 'close';
-            $keep_connection = false;
-        } else {
-            $headers['Connection'] = 'Keep-Alive';
-            $headers['Keep-Alive'] = "timeout=$keep_alive_timeout, max=" . ($keep_alive_max_requests - $request_count);
-        }
+        $connection_policy = apply_connection_policy(
+            $headers,
+            $client_wants_keepalive,
+            $request_count,
+            $keep_alive_max_requests,
+            $keep_alive_timeout
+        );
+        $headers = $connection_policy['headers'];
+        $keep_connection = $connection_policy['keep_connection'];
 
         $headers['Content-Length'] = strlen($body);
 
