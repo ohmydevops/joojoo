@@ -219,6 +219,9 @@ flycheck_*.el
 # network security
 /network-security.data
 
+# PHP-CS-Fixer cache
+.php-cs-fixer.cache
+
 ##### SublimeText
 # Cache files for Sublime Text
 *.tmlanguage.cache

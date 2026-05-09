@@ -7,10 +7,10 @@
         "php": "^8.4"
     },
     "require-dev": {
-        "laravel/pint": "^1.13"
+        "friendsofphp/php-cs-fixer": "^3.79"
     },
     "scripts": {
-        "fix": "pint",
-        "test": "pint --test"
+        "cs:fix": "php-cs-fixer fix --config=.php-cs-fixer.dist.php",
+        "cs:check": "php-cs-fixer fix --dry-run --diff --config=.php-cs-fixer.dist.php"
     }
 }

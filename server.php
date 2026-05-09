@@ -315,5 +315,3 @@ foreach ($workers as $worker_pid) {
     pcntl_waitpid($worker_pid, $status);
 }
 
-
-// refactor: make code more organized and modular, add comments, and improve error handling.

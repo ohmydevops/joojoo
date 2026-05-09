@@ -9,6 +9,7 @@ Inspired by `micro_httpd` (the web server in my TP-Link TD-8811 modem), I built 
 ## Quick Start
 
 **Local:**
+
 ```bash
 php server.php
 # or set custom web directory
@@ -16,6 +17,7 @@ BASE_WEB_DIR=/path/to/site php server.php
 ```
 
 **Docker (build and run):**
+
 ```bash
 # Build image
 docker build -t joojoo .
@@ -30,6 +32,7 @@ docker run --name joojoo --init --rm \
 ## HTTP/1.1 Implementation Roadmap
 
 **Request Methods:**
+
 - [x] GET
 - [ ] HEAD
 - [ ] POST
@@ -39,6 +42,7 @@ docker run --name joojoo --init --rm \
 - [ ] TRACE
 
 **Status Codes:**
+
 - [x] 200 OK
 - [ ] 206 Partial Content
 - [ ] 301 Moved Permanently
@@ -52,6 +56,7 @@ docker run --name joojoo --init --rm \
 - [ ] 503 Service Unavailable
 
 **Request Headers:**
+
 - [x] Connection (Keep-Alive/Close)
 - [x] Host
 - [ ] Range (for partial content)
@@ -62,6 +67,7 @@ docker run --name joojoo --init --rm \
 - [ ] Accept-Encoding
 
 **Response Headers:**
+
 - [x] Content-Type
 - [x] Content-Length
 - [x] Server
@@ -74,6 +80,7 @@ docker run --name joojoo --init --rm \
 - [ ] Transfer-Encoding (chunked)
 
 **Features:**
+
 - [x] Multi-process worker model (prefork)
 - [x] Persistent connections (Keep-Alive)
 - [x] Common Log Format
@@ -93,15 +100,17 @@ docker run --name joojoo --init --rm \
 ## Development
 
 **Install dependencies:**
+
 ```bash
 composer install
 ```
 
-**Code formatting with Pint:**
+**Code formatting with PHP-CS-Fixer:**
+
 ```bash
 # Fix code style
-composer fix
+composer cs:fix
 
 # Check code style (without fixing)
-composer test
+composer cs:check
 ```  
