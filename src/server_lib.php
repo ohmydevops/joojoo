@@ -392,9 +392,10 @@ function handle_client_connection(
 /**
  * Start the prefork HTTP server.
  */
-function run_server(string $web_dir, array $content_types): void
+function run_server(string $web_dir): void
 {
     $workers = [];
+    $content_types = get_default_content_types();
     $sock = create_server_socket(HOST, PORT);
     if ($sock === false) {
         logging('Failed to create server socket: ' . socket_strerror(socket_last_error()));
