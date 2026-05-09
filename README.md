@@ -32,8 +32,10 @@ docker run --name joojoo --init --rm \
 ```
 
 <!-- markdownlint-disable MD033 -->
+## HTTP/1.1 Implementation Roadmap
+
 <details>
-<summary>HTTP/1.1 Implementation Roadmap</summary>
+<summary>Roadmap</summary>
 
 **Request Methods:**
 
