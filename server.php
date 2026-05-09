@@ -3,6 +3,9 @@
 
 declare(strict_types=1);
 
+/**
+ * Resolve the number of CPU cores for worker process sizing.
+ */
 function get_processor_cores_number(): int
 {
     return match (PHP_OS_FAMILY) {
@@ -42,6 +45,9 @@ enum HTTP_STATUS: string
     case SERVICE_UNAVAILABLE = '503';
 }
 
+/**
+ * Map an HTTP status enum case to an HTTP/1.1 status line (code and reason phrase).
+ */
 function get_status_message(HTTP_STATUS $status): string
 {
     return match ($status) {
@@ -85,16 +91,25 @@ $content_types = [
     'apk' => 'application/vnd.android.package-archive',
 ];
 
+/**
+ * Write a single log line to standard output.
+ */
 function logging(string $message): void
 {
     echo $message . PHP_EOL;
 }
 
+/**
+ * Extract the request line (for example: GET / HTTP/1.1) from a raw request.
+ */
 function get_first_line_http(string $request): string
 {
     return explode("\r\n", trim($request), 2)[0];
 }
 
+/**
+ * Parse HTTP headers from a raw request into a lowercase key/value map.
+ */
 function get_headers_from_request(string $request): array
 {
     $lines = explode("\r\n", trim($request));
@@ -115,6 +130,9 @@ function get_headers_from_request(string $request): array
     return $headers;
 }
 
+/**
+ * Decide whether the client connection should remain persistent.
+ */
 function should_keep_alive(array $request_headers): bool
 {
     return isset($request_headers['connection'])
@@ -122,12 +140,18 @@ function should_keep_alive(array $request_headers): bool
         : true; // HTTP/1.1 defaults to keep-alive (RFC 7230)
 }
 
+/**
+ * Detect MIME type from file extension with a safe binary fallback.
+ */
 function file_mime_detector(string $requested_file, array $content_types): string
 {
     $file_extension = pathinfo($requested_file, PATHINFO_EXTENSION);
     return $content_types[$file_extension] ?? 'application/octet-stream';
 }
 
+/**
+ * Build a full HTTP/1.1 response string from status, headers, and body.
+ */
 function build_http_response(HTTP_STATUS $status_code, array $headers, string $body): string
 {
 
@@ -141,6 +165,9 @@ function build_http_response(HTTP_STATUS $status_code, array $headers, string $b
     return "HTTP/1.1 $status_line\r\n$header_string\r\n$body";
 }
 
+/**
+ * Return a successful file response tuple for an existing readable file.
+ */
 function handle_file_response(string $requested_file, array $content_types): array
 {
     if (! is_readable($requested_file)) {
@@ -153,6 +180,9 @@ function handle_file_response(string $requested_file, array $content_types): arr
     return [HTTP_STATUS::OK, $headers, $body];
 }
 
+/**
+ * Return a minimal 404 HTML response tuple.
+ */
 function handle_not_found_response(): array
 {
     $body = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
@@ -165,6 +195,9 @@ function handle_not_found_response(): array
     return [HTTP_STATUS::NOT_FOUND, $headers, $body];
 }
 
+/**
+ * Create, configure, bind, and listen on the main TCP server socket.
+ */
 function create_server_socket(string $host, int $port): Socket|false
 {
     $sock = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
@@ -190,6 +223,9 @@ function create_server_socket(string $host, int $port): Socket|false
     return $sock;
 }
 
+/**
+ * Read bytes from a client until the end of HTTP headers is reached.
+ */
 function read_request(Socket $client): string|false
 {
     $request = '';
@@ -203,6 +239,9 @@ function read_request(Socket $client): string|false
     return $request;
 }
 
+/**
+ * Accept clients in a worker process and hand each to the request loop.
+ */
 function worker_process(
     Socket $socket,
     string $web_dir,
@@ -221,6 +260,9 @@ function worker_process(
     }
 }
 
+/**
+ * Process one keep-alive connection and serve multiple sequential requests.
+ */
 function handle_client_connection(
     Socket $client,
     string $web_dir,
@@ -314,4 +356,3 @@ logging('🚀 Server is running on ' . HOST . ':' . PORT . ' with ' . WORKER_COU
 foreach ($workers as $worker_pid) {
     pcntl_waitpid($worker_pid, $status);
 }
-
