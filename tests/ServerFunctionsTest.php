@@ -40,13 +40,13 @@ final class ServerFunctionsTest extends TestCase
     {
         $requestContext = [
             'method' => 'HEAD',
-            'request_path' => '/sample-website/index.html',
+            'request_path' => '/docs/index.html',
         ];
 
         [$status, $headers, $body] = handle_request_by_method(
             dirname(__DIR__),
             $requestContext,
-            get_default_content_types()
+            DEFAULT_CONTENT_TYPES
         );
 
         $this->assertSame(HTTP_STATUS::OK, $status);
@@ -60,7 +60,7 @@ final class ServerFunctionsTest extends TestCase
         [$status] = route_request_response(
             dirname(__DIR__),
             '/../composer.json',
-            get_default_content_types()
+            DEFAULT_CONTENT_TYPES
         );
 
         $this->assertSame(HTTP_STATUS::FORBIDDEN, $status);

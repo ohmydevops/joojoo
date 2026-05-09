@@ -48,34 +48,31 @@ function get_status_message(HTTP_STATUS $status): string
 }
 
 /**
- * Return default content type map for static files.
+ * Default content type map for static files.
  */
-function get_default_content_types(): array
-{
-    return [
-        'html' => 'text/html;charset=utf-8',
-        'css' => 'text/css',
-        'js' => 'text/javascript',
-        'apng' => 'image/apng',
-        'gif' => 'image/gif',
-        'jpeg' => 'image/jpeg',
-        'jpg' => 'image/jpeg',
-        'png' => 'image/png',
-        'svg' => 'image/svg+xml',
-        'webp' => 'image/webp',
-        'ogg' => 'audio/ogg',
-        'oga' => 'audio/ogg',
-        'mp3' => 'audio/mpeg3',
-        'wav' => 'audio/wav',
-        'mp4' => 'video/mp4',
-        '.3gp' => 'video/3gpp',
-        'flv' => 'video/x-flv',
-        'mov' => 'video/quicktime',
-        'mpg4' => 'video/mp4',
-        'json' => 'application/json',
-        'apk' => 'application/vnd.android.package-archive',
-    ];
-}
+const DEFAULT_CONTENT_TYPES = [
+    'html' => 'text/html;charset=utf-8',
+    'css' => 'text/css',
+    'js' => 'text/javascript',
+    'apng' => 'image/apng',
+    'gif' => 'image/gif',
+    'jpeg' => 'image/jpeg',
+    'jpg' => 'image/jpeg',
+    'png' => 'image/png',
+    'svg' => 'image/svg+xml',
+    'webp' => 'image/webp',
+    'ogg' => 'audio/ogg',
+    'oga' => 'audio/ogg',
+    'mp3' => 'audio/mpeg3',
+    'wav' => 'audio/wav',
+    'mp4' => 'video/mp4',
+    '.3gp' => 'video/3gpp',
+    'flv' => 'video/x-flv',
+    'mov' => 'video/quicktime',
+    'mpg4' => 'video/mp4',
+    'json' => 'application/json',
+    'apk' => 'application/vnd.android.package-archive',
+];
 
 /**
  * Write a single log line to standard output.
@@ -469,7 +466,6 @@ function handle_client_connection(
 function run_server(string $web_dir): void
 {
     $workers = [];
-    $content_types = get_default_content_types();
     $sock = create_server_socket(HOST, PORT);
     if ($sock === false) {
         logging('Failed to create server socket: ' . socket_strerror(socket_last_error()));
@@ -490,7 +486,7 @@ function run_server(string $web_dir): void
             $workers[] = $pid;
         } else {
             // Child process - become a worker
-            worker_process($sock, $web_dir, $content_types, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT);
+            worker_process($sock, $web_dir, DEFAULT_CONTENT_TYPES, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT);
             exit(0);
         }
     }
