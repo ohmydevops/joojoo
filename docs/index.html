@@ -171,14 +171,14 @@ docker run --name joojoo --init --rm \
 graph LR
     A["✓ Core<br/>HTTP/1.1"] --> B["✓ Workers<br/>Prefork"]
     B --> C["✓ Keep-alive<br/>Reuse"]
-    C --> D["→ Compression<br/>gzip/brotli"]
+    C --> D["✓ Compression<br/>gzip"]
     D --> E["→ Range<br/>Requests"]
     E --> F["→ HTTPS<br/>Support"]
     
     style A fill:#90EE90
     style B fill:#90EE90
     style C fill:#90EE90
-    style D fill:#FFE4B5
+    style D fill:#90EE90
     style E fill:#FFE4B5
     style F fill:#FFE4B5
             </div>
