@@ -2,17 +2,6 @@
 
 declare(strict_types=1);
 
-/**
- * Resolve the number of CPU cores for worker process sizing.
- */
-function get_processor_cores_number(): int
-{
-    return match (PHP_OS_FAMILY) {
-        'Darwin' => (int) shell_exec('sysctl -n hw.ncpu'),
-        default => (int) shell_exec('nproc'),
-    };
-}
-
 // Server configuration
 define('HOST', '0.0.0.0');
 define('PORT', 8000);
@@ -73,6 +62,18 @@ const DEFAULT_CONTENT_TYPES = [
     'json' => 'application/json',
     'apk' => 'application/vnd.android.package-archive',
 ];
+
+
+/**
+ * Resolve the number of CPU cores for worker process sizing.
+ */
+function get_processor_cores_number(): int
+{
+    return match (PHP_OS_FAMILY) {
+        'Darwin' => (int) shell_exec('sysctl -n hw.ncpu'),
+        default => (int) shell_exec('nproc'),
+    };
+}
 
 /**
  * Write a single log line to standard output.
