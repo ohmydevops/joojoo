@@ -60,9 +60,68 @@ final class ServerFunctionsTest extends TestCase
         [$status] = route_request_response(
             dirname(__DIR__),
             '/../composer.json',
+            [],
             DEFAULT_CONTENT_TYPES
         );
 
         $this->assertSame(HTTP_STATUS::FORBIDDEN, $status);
+    }
+
+    public function test_gzip_response_sets_encoding_and_is_decodable(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/sample.txt';
+        $originalBody = str_repeat('joojoo-compression-test-', 300);
+        file_put_contents($filePath, $originalBody);
+
+        try {
+            [$status, $headers, $body] = route_request_response(
+                $tempDir,
+                '/sample.txt',
+                ['gzip'],
+                DEFAULT_CONTENT_TYPES
+            );
+
+            $this->assertSame(HTTP_STATUS::OK, $status);
+            $this->assertSame('gzip', $headers['Content-Encoding']);
+            $this->assertSame('Accept-Encoding', $headers['Vary']);
+            $this->assertSame($originalBody, gzdecode($body));
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_gzip_response_body_is_smaller_than_plain_for_repetitive_content(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/sample.txt';
+        $originalBody = str_repeat('aaaaaaaaaabbbbbbbbbbcccccccccc', 500);
+        file_put_contents($filePath, $originalBody);
+
+        try {
+            [, , $plainBody] = route_request_response(
+                $tempDir,
+                '/sample.txt',
+                [],
+                DEFAULT_CONTENT_TYPES
+            );
+
+            [, $gzipHeaders, $gzipBody] = route_request_response(
+                $tempDir,
+                '/sample.txt',
+                ['gzip'],
+                DEFAULT_CONTENT_TYPES
+            );
+
+            $this->assertSame('gzip', $gzipHeaders['Content-Encoding']);
+            $this->assertLessThan(strlen($plainBody), strlen($gzipBody));
+            $this->assertSame($plainBody, gzdecode($gzipBody));
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
     }
 }
