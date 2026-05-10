@@ -89,18 +89,14 @@
         <!-- Roadmap Section -->
         <section id="roadmap" class="section">
             <h2>Development Roadmap</h2>
-            <div class="mermaid">
+            <div class="mermaid roadmap-chart">
 graph LR
-    A["✓ Core<br/>HTTP/1.1"] --> B["✓ Workers<br/>Prefork"]
-    B --> C["✓ Keep-alive<br/>Reuse"]
-    C --> D["✓ Compression<br/>gzip"]
-    D --> E["→ Range<br/>Requests"]
-    E --> F["→ HTTPS<br/>Support"]
-    
+    A["✓ Core"] --> B["✓ Keep-Alive"] --> C["✓ Gzip"] --> D["→ Cache"] --> E["→ Range"] --> F["→ SSL"]
+
     style A fill:#90EE90
     style B fill:#90EE90
     style C fill:#90EE90
-    style D fill:#90EE90
+    style D fill:#FFE4B5
     style E fill:#FFE4B5
     style F fill:#FFE4B5
             </div>
