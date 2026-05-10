@@ -96,18 +96,15 @@
             <h3>Architecture</h3>
             <div class="mermaid">
 graph TD
-    A["Client Request"] --> B["Main Process"]
-    B --> C["Worker Pool<br/>Prefork Model"]
-    C --> D1["Worker 1"]
-    C --> D2["Worker 2"]
-    C --> D3["Worker N"]
-    D1 --> E["Parse Request"]
-    D2 --> E
-    D3 --> E
-    E --> F["Validate Path<br/>Traversal Protection"]
-    F --> G["Resolve File/<br/>Directory"]
-    G --> H["Return HTTP Response"]
-    H --> A
+    A["Master Process"] --> B["Create Server Socket"]
+    B --> C["Prefork Workers"]
+    C --> W1["Worker 1"]
+    C --> W2["Worker 2"]
+    C --> WN["Worker N"]
+    W1 --> L["Accept and Handle Client Connections"]
+    W2 --> L
+    WN --> L
+    L --> K["Keep-Alive Reuse\n(timeout/max requests)"]
             </div>
 
             <h3>Request Flow</h3>
@@ -117,10 +114,23 @@ sequenceDiagram
     participant Worker
     participant FileSystem
     
-    Client->>Worker: HTTP GET /index.html
-    Worker->>Worker: Parse headers & path
+    Client->>Worker: HTTP GET /index.html (+/- Accept-Encoding: gzip)
+    Worker->>Worker: Parse headers, path, and accepted encodings
     Worker->>FileSystem: Check if file exists
     FileSystem-->>Worker: File found
+    alt Client accepts gzip
+        Worker->>FileSystem: Check if /index.html.gz exists
+        alt Precompressed file exists
+            FileSystem-->>Worker: .gz file found
+        else No precompressed file
+            FileSystem-->>Worker: .gz not found
+            Worker->>Worker: gzip original file on the fly
+        end
+        Worker->>Worker: Set Content-Encoding: gzip
+        Worker->>Worker: Set Vary: Accept-Encoding
+    else Client does not accept gzip
+        Worker->>Worker: Send original uncompressed file
+    end
     Worker->>Worker: Read Content-Type
     Worker->>Worker: Set Content-Length
     Worker-->>Client: HTTP/1.1 200 OK + file
