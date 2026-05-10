@@ -23,20 +23,6 @@ enum HTTP_STATUS: string
 }
 
 /**
- * Map an HTTP status enum case to an HTTP/1.1 status line (code and reason phrase).
- */
-function get_status_message(HTTP_STATUS $status): string
-{
-    return match ($status) {
-        HTTP_STATUS::OK => '200 OK',
-        HTTP_STATUS::FORBIDDEN => '403 Forbidden',
-        HTTP_STATUS::NOT_FOUND => '404 Not Found',
-        HTTP_STATUS::METHOD_NOT_ALLOWED => '405 Method Not Allowed',
-        default => "$status->value Unknown",
-    };
-}
-
-/**
  * Default content type map for static files.
  */
 const DEFAULT_CONTENT_TYPES = [
@@ -84,154 +70,105 @@ function logging(string $message): void
 }
 
 /**
- * Extract the request line (for example: GET / HTTP/1.1) from a raw request.
+ * Parse request metadata (method, path, headers, first line) from a raw request.
  */
-function get_first_line_http(string $request): string
-{
-    return explode("\r\n", trim($request), 2)[0];
-}
-
-/**
- * Parse HTTP headers from a raw request into a lowercase key/value map.
- */
-function get_headers_from_request(string $request): array
+function parse_request_context(string $request): array
 {
     $lines = explode("\r\n", trim($request));
-    array_shift($lines); // Remove request line
+    $first_line = $lines[0] ?? '';
+    $method = strtoupper(explode(' ', $first_line)[0] ?? 'GET');
+    $request_uri = explode(' ', $first_line)[1] ?? '/';
+    $request_path = parse_url($request_uri, PHP_URL_PATH) ?? '/';
 
     $headers = [];
-    foreach ($lines as $line) {
+    foreach (array_slice($lines, 1) as $line) {
         if (empty($line)) {
             break;
         }
         if (! str_contains($line, ':')) {
             continue;
         }
-
         [$key, $value] = explode(':', $line, 2);
         $headers[strtolower(trim($key))] = trim($value);
     }
-    return $headers;
-}
-
-/**
- * Parse request metadata needed for routing and connection decisions.
- */
-function parse_request_context(string $request): array
-{
-    $first_line = get_first_line_http($request);
-    $method = strtoupper(explode(' ', $first_line)[0] ?? 'GET');
-    $request_uri = explode(' ', $first_line)[1] ?? '/';
-    $request_path = parse_url($request_uri, PHP_URL_PATH) ?? '/';
 
     return [
         'method' => $method,
         'first_line' => $first_line,
-        'headers' => get_headers_from_request($request),
+        'headers' => $headers,
         'request_path' => $request_path,
     ];
 }
 
 /**
- * Build an absolute file path inside the configured web root.
- */
-function resolve_request_file_path(string $web_dir, string $request_path): string
-{
-    return rtrim($web_dir, '/') . $request_path;
-}
-
-/**
- * Keep static file serving safe by rejecting traversal and null-byte paths.
- */
-function is_safe_request_path(string $request_path): bool
-{
-    if (str_contains($request_path, "\0")) {
-        return false;
-    }
-
-    foreach (explode('/', $request_path) as $segment) {
-        if ($segment === '..') {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-/**
- * Route request path to either static file response or not-found response.
+ * Route request path to either static file response or error response.
  */
 function route_request_response(string $web_dir, string $request_path, array $content_types): array
 {
-    if (! is_safe_request_path($request_path)) {
-        return handle_forbidden_response();
+    if (str_contains($request_path, "\0")) {
+        return handle_error_response(HTTP_STATUS::FORBIDDEN);
+    }
+    foreach (explode('/', $request_path) as $segment) {
+        if ($segment === '..') {
+            return handle_error_response(HTTP_STATUS::FORBIDDEN);
+        }
     }
 
-    $file_path = resolve_request_file_path($web_dir, $request_path);
-
+    $file_path = rtrim($web_dir, '/') . $request_path;
     if (is_dir($file_path)) {
         $file_path = rtrim($file_path, '/') . '/index.html';
     }
 
-    return is_file($file_path)
-        ? handle_file_response($file_path, $content_types)
-        : handle_not_found_response();
+    if (! is_file($file_path) || ! is_readable($file_path)) {
+        return handle_error_response(HTTP_STATUS::NOT_FOUND);
+    }
+
+    $extension = pathinfo($file_path, PATHINFO_EXTENSION);
+    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => $content_types[$extension] ?? 'application/octet-stream'];
+
+    return [HTTP_STATUS::OK, $headers, file_get_contents($file_path)];
 }
 
 /**
- * Build the HEAD response from an already resolved GET-style response.
- */
-function build_head_response(array $response): array
-{
-    [$status_code, $headers, $body] = $response;
-    $headers['Content-Length'] = strlen($body);
-
-    return [$status_code, $headers, ''];
-}
-
-/**
- * Return a 405 response tuple and list supported methods.
- */
-function handle_method_not_allowed_response(array $allowed_methods): array
-{
-    $body = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-        . '<meta content="width=device-width,initial-scale=1.0" name="viewport">'
-        . '<title>Method Not Allowed</title></head><body><h1>405 Method Not Allowed</h1>'
-        . '<p>The requested method is not supported for this resource.</p></body></html>';
-
-    $headers = [
-        ...DEFAULT_RESPONSE_HEADERS,
-        'Content-Type' => 'text/html',
-        'Allow' => implode(', ', $allowed_methods),
-    ];
-
-    return [HTTP_STATUS::METHOD_NOT_ALLOWED, $headers, $body];
-}
-
-/**
- * Dispatch request handling by HTTP method.
+ * Dispatch request handling by HTTP method (GET, HEAD, or 405).
  */
 function handle_request_by_method(string $web_dir, array $request_context, array $content_types): array
 {
-    $method = $request_context['method'];
-    $request_path = $request_context['request_path'];
-    $resource_response = route_request_response($web_dir, $request_path, $content_types);
+    $resource_response = route_request_response($web_dir, $request_context['request_path'], $content_types);
 
-    return match ($method) {
+    return match ($request_context['method']) {
         'GET' => $resource_response,
-        'HEAD' => build_head_response($resource_response),
-        default => handle_method_not_allowed_response(['GET', 'HEAD']),
+        'HEAD' => [
+            $resource_response[0],
+            [...$resource_response[1], 'Content-Length' => strlen($resource_response[2])],
+            '',
+        ],
+        default => handle_error_response(HTTP_STATUS::METHOD_NOT_ALLOWED, ['GET', 'HEAD']),
     };
 }
 
 /**
- * Decide whether the client connection should remain persistent.
+ * Build a minimal HTML error response tuple for 403/404/405.
  */
-function should_keep_alive(array $request_headers): bool
+function handle_error_response(HTTP_STATUS $status, array $allowed_methods = []): array
 {
-    return isset($request_headers['connection'])
-        ? strtolower($request_headers['connection']) === 'keep-alive'
-        : true; // HTTP/1.1 defaults to keep-alive (RFC 7230)
+    $messages = [
+        HTTP_STATUS::FORBIDDEN->value => ['403 Forbidden', 'Access to this resource is not allowed.'],
+        HTTP_STATUS::NOT_FOUND->value => ['404 Not Found', 'The requested file was not found.'],
+        HTTP_STATUS::METHOD_NOT_ALLOWED->value => ['405 Method Not Allowed', 'The requested method is not supported for this resource.'],
+    ];
+    [$title, $message] = $messages[$status->value];
+
+    $body = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        . '<meta content="width=device-width,initial-scale=1.0" name="viewport">'
+        . "<title>$title</title></head><body><h1>$title</h1><p>$message</p></body></html>";
+
+    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => 'text/html'];
+    if ($allowed_methods) {
+        $headers['Allow'] = implode(', ', $allowed_methods);
+    }
+
+    return [$status, $headers, $body];
 }
 
 /**
@@ -244,8 +181,7 @@ function apply_connection_policy(
     int $keep_alive_max_requests,
     int $keep_alive_timeout
 ): array {
-    $max_requests_reached = $request_count >= $keep_alive_max_requests;
-    $should_close = ! $client_wants_keepalive || $max_requests_reached;
+    $should_close = ! $client_wants_keepalive || $request_count >= $keep_alive_max_requests;
 
     if ($should_close) {
         return [
@@ -267,21 +203,17 @@ function apply_connection_policy(
 }
 
 /**
- * Detect MIME type from file extension with a safe binary fallback.
- */
-function file_mime_detector(string $requested_file, array $content_types): string
-{
-    $file_extension = pathinfo($requested_file, PATHINFO_EXTENSION);
-    return $content_types[$file_extension] ?? 'application/octet-stream';
-}
-
-/**
  * Build a full HTTP/1.1 response string from status, headers, and body.
  */
 function build_http_response(HTTP_STATUS $status_code, array $headers, string $body): string
 {
-
-    $status_line = get_status_message($status_code);
+    $reasons = [
+        HTTP_STATUS::OK->value => 'OK',
+        HTTP_STATUS::FORBIDDEN->value => 'Forbidden',
+        HTTP_STATUS::NOT_FOUND->value => 'Not Found',
+        HTTP_STATUS::METHOD_NOT_ALLOWED->value => 'Method Not Allowed',
+    ];
+    $status_line = $status_code->value . ' ' . ($reasons[$status_code->value] ?? 'Unknown');
 
     $header_string = '';
     foreach ($headers as $key => $value) {
@@ -289,51 +221,6 @@ function build_http_response(HTTP_STATUS $status_code, array $headers, string $b
     }
 
     return "HTTP/1.1 $status_line\r\n$header_string\r\n$body";
-}
-
-/**
- * Return a successful file response tuple for an existing readable file.
- */
-function handle_file_response(string $requested_file, array $content_types): array
-{
-    if (! is_readable($requested_file)) {
-        return handle_not_found_response();
-    }
-
-    $body = file_get_contents($requested_file);
-    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => file_mime_detector($requested_file, $content_types)];
-
-    return [HTTP_STATUS::OK, $headers, $body];
-}
-
-/**
- * Return a minimal 404 HTML response tuple.
- */
-function handle_not_found_response(): array
-{
-    $body = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-        . '<meta content="width=device-width,initial-scale=1.0" name="viewport">'
-        . '<title>Not Found</title></head><body><h1>404 Not Found</h1>'
-        . '<p>The requested file was not found.</p></body></html>';
-
-    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => 'text/html'];
-
-    return [HTTP_STATUS::NOT_FOUND, $headers, $body];
-}
-
-/**
- * Return a minimal 403 HTML response tuple for blocked paths.
- */
-function handle_forbidden_response(): array
-{
-    $body = '<!DOCTYPE html><html><head><meta charset="UTF-8">'
-        . '<meta content="width=device-width,initial-scale=1.0" name="viewport">'
-        . '<title>Forbidden</title></head><body><h1>403 Forbidden</h1>'
-        . '<p>Access to this resource is not allowed.</p></body></html>';
-
-    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => 'text/html'];
-
-    return [HTTP_STATUS::FORBIDDEN, $headers, $body];
 }
 
 /**
@@ -428,8 +315,9 @@ function handle_client_connection(
 
         [$status_code, $headers, $body] = handle_request_by_method($web_dir, $request_context, $content_types);
 
-        // Determine connection persistence
-        $client_wants_keepalive = should_keep_alive($request_headers);
+        // Determine connection persistence (HTTP/1.1 defaults to keep-alive per RFC 7230)
+        $client_wants_keepalive = ! isset($request_headers['connection'])
+            || strtolower($request_headers['connection']) === 'keep-alive';
         $connection_policy = apply_connection_policy(
             $headers,
             $client_wants_keepalive,
@@ -492,8 +380,19 @@ function run_server(string $web_dir, ?int $worker_count): void
             exit(0);
         }
     }
+    
+    logging("\033[93m    _                 _                 \033[0m");
+    logging("\033[93m   (_)               (_)                \033[0m");
+    logging("\033[93m    _  ___    ___     _  ___    ___     \033[0m");
+    logging("\033[93m   | |/ _ \\  / _ \\   | |/ _ \\  / _ \\    \033[0m");
+    logging("\033[93m   | | (_) || (_) |  | | (_) || (_) |   \033[0m");
+    logging("\033[93m   | |\\___/  \\___/   | |\\___/  \\___/    \033[0m");
+    logging("\033[93m  _/ |               _/ |               \033[0m");
+    logging("\033[93m |__/               |__/                \033[0m");
 
-    logging("\033[92m Server is running on " . HOST . ':' . PORT . ' with ' . $worker_count . ' workers\033[0m');
+    logging("");
+
+    logging("\033[92m Server is running on " . HOST . ':' . PORT . ' with ' . $worker_count . ' workers. ' . "\033[0m");
     logging("\033[92m Serving files from: " . $web_dir . "\033[0m");
 
     if (! is_dir($web_dir)) {
