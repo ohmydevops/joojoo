@@ -103,7 +103,7 @@ function parse_request_context(string $request): array
 /**
  * Route request path to either static file response or error response.
  */
-function route_request_response(string $web_dir, string $request_path, array $content_types): array
+function route_request_response(string $web_dir, string $request_path, array $accepted_encodings, array $content_types): array
 {
     if (str_contains($request_path, "\0")) {
         return handle_error_response(HTTP_STATUS::FORBIDDEN);
@@ -126,7 +126,18 @@ function route_request_response(string $web_dir, string $request_path, array $co
     $extension = pathinfo($file_path, PATHINFO_EXTENSION);
     $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => $content_types[$extension] ?? 'application/octet-stream'];
 
-    return [HTTP_STATUS::OK, $headers, file_get_contents($file_path)];
+    // Handle accepted encodings and static/on-the-fly gzip.
+    if (in_array('gzip', $accepted_encodings, true)) {
+        $headers['Content-Encoding'] = 'gzip';
+        $headers['Vary'] = 'Accept-Encoding';
+        $body = is_readable($file_path . '.gz')
+            ? file_get_contents($file_path . '.gz')
+            : gzencode(file_get_contents($file_path));
+    } else {
+        $body = file_get_contents($file_path);
+    }
+
+    return [HTTP_STATUS::OK, $headers, $body];
 }
 
 /**
@@ -134,7 +145,8 @@ function route_request_response(string $web_dir, string $request_path, array $co
  */
 function handle_request_by_method(string $web_dir, array $request_context, array $content_types): array
 {
-    $resource_response = route_request_response($web_dir, $request_context['request_path'], $content_types);
+    $accepted_encodings = array_map('trim', explode(',', $request_context['headers']['accept-encoding'] ?? ''));
+    $resource_response = route_request_response($web_dir, $request_context['request_path'], $accepted_encodings, $content_types);
 
     return match ($request_context['method']) {
         'GET' => $resource_response,
@@ -257,6 +269,7 @@ function create_server_socket(string $host, int $port): \Socket|false
 function read_request(\Socket $client): string|false
 {
     $request = '';
+    // Read until we get the full http header (ending with \r\n\r\n or CRLF CRLF)
     while (! str_ends_with($request, "\r\n\r\n")) {
         $data = @socket_read($client, 1024);
         if ($data === false || $data === '') {
@@ -380,18 +393,7 @@ function run_server(string $web_dir, ?int $worker_count): void
             exit(0);
         }
     }
-    
-    logging("\033[93m    _                 _                 \033[0m");
-    logging("\033[93m   (_)               (_)                \033[0m");
-    logging("\033[93m    _  ___    ___     _  ___    ___     \033[0m");
-    logging("\033[93m   | |/ _ \\  / _ \\   | |/ _ \\  / _ \\    \033[0m");
-    logging("\033[93m   | | (_) || (_) |  | | (_) || (_) |   \033[0m");
-    logging("\033[93m   | |\\___/  \\___/   | |\\___/  \\___/    \033[0m");
-    logging("\033[93m  _/ |               _/ |               \033[0m");
-    logging("\033[93m |__/               |__/                \033[0m");
-
-    logging("");
-
+    logging('');
     logging("\033[92m Server is running on " . HOST . ':' . PORT . ' with ' . $worker_count . ' workers. ' . "\033[0m");
     logging("\033[92m Serving files from: " . $web_dir . "\033[0m");
 
