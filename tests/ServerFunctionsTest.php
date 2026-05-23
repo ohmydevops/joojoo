@@ -46,7 +46,6 @@ final class ServerFunctionsTest extends TestCase
         [$status, $headers, $body] = handle_request_by_method(
             dirname(__DIR__),
             $requestContext,
-            DEFAULT_CONTENT_TYPES
         );
 
         $this->assertSame(HTTP_STATUS::OK, $status);
@@ -61,7 +60,6 @@ final class ServerFunctionsTest extends TestCase
             dirname(__DIR__),
             '/../composer.json',
             [],
-            DEFAULT_CONTENT_TYPES
         );
 
         $this->assertSame(HTTP_STATUS::FORBIDDEN, $status);
@@ -80,7 +78,6 @@ final class ServerFunctionsTest extends TestCase
                 $tempDir,
                 '/sample.txt',
                 ['gzip'],
-                DEFAULT_CONTENT_TYPES
             );
 
             $this->assertSame(HTTP_STATUS::OK, $status);
@@ -106,14 +103,12 @@ final class ServerFunctionsTest extends TestCase
                 $tempDir,
                 '/sample.txt',
                 [],
-                DEFAULT_CONTENT_TYPES
             );
 
             [, $gzipHeaders, $gzipBody] = route_request_response(
                 $tempDir,
                 '/sample.txt',
                 ['gzip'],
-                DEFAULT_CONTENT_TYPES
             );
 
             $this->assertSame('gzip', $gzipHeaders['Content-Encoding']);
@@ -121,6 +116,49 @@ final class ServerFunctionsTest extends TestCase
             $this->assertSame($plainBody, gzdecode($gzipBody));
         } finally {
             unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_content_type_is_set_based_on_file_extension(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+
+        $cases = [
+            'index.html' => [
+                'content' => '<!doctype html><html><head><title>t</title></head><body>x</body></html>',
+                'assertion' => static fn (string $type): bool => str_starts_with($type, 'text/html'),
+            ],
+            'style.css' => [
+                'content' => 'body { color: #111; font-family: sans-serif; }',
+                'assertion' => static fn (string $type): bool => in_array($type, ['text/css', 'text/plain'], true),
+            ],
+            'font.woff2' => [
+                'content' => "wOF2" . str_repeat("\0", 32),
+                'assertion' => static fn (string $type): bool => in_array(
+                    $type,
+                    ['font/woff2', 'application/font-woff2', 'application/octet-stream'],
+                    true
+                ),
+            ],
+            'logo.png' => [
+                'content' => base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl3xQAAAABJRU5ErkJggg==', true),
+                'assertion' => static fn (string $type): bool => $type === 'image/png',
+            ],
+        ];
+
+        try {
+            foreach ($cases as $filename => $case) {
+                file_put_contents("$tempDir/$filename", $case['content']);
+
+                [, $headers] = route_request_response($tempDir, "/$filename", []);
+
+                $this->assertTrue(($case['assertion'])($headers['Content-Type']), "Failed for $filename");
+
+                unlink("$tempDir/$filename");
+            }
+        } finally {
             rmdir($tempDir);
         }
     }

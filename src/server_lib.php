@@ -23,34 +23,6 @@ enum HTTP_STATUS: string
 }
 
 /**
- * Default content type map for static files.
- */
-const DEFAULT_CONTENT_TYPES = [
-    'html' => 'text/html;charset=utf-8',
-    'css' => 'text/css',
-    'js' => 'text/javascript',
-    'apng' => 'image/apng',
-    'gif' => 'image/gif',
-    'jpeg' => 'image/jpeg',
-    'jpg' => 'image/jpeg',
-    'png' => 'image/png',
-    'svg' => 'image/svg+xml',
-    'webp' => 'image/webp',
-    'ogg' => 'audio/ogg',
-    'oga' => 'audio/ogg',
-    'mp3' => 'audio/mpeg3',
-    'wav' => 'audio/wav',
-    'mp4' => 'video/mp4',
-    '.3gp' => 'video/3gpp',
-    'flv' => 'video/x-flv',
-    'mov' => 'video/quicktime',
-    'mpg4' => 'video/mp4',
-    'json' => 'application/json',
-    'apk' => 'application/vnd.android.package-archive',
-];
-
-
-/**
  * Resolve the number of CPU cores for worker process sizing.
  */
 function get_processor_cores_number(): int
@@ -103,7 +75,7 @@ function parse_request_context(string $request): array
 /**
  * Route request path to either static file response or error response.
  */
-function route_request_response(string $web_dir, string $request_path, array $accepted_encodings, array $content_types): array
+function route_request_response(string $web_dir, string $request_path, array $accepted_encodings): array
 {
     if (str_contains($request_path, "\0")) {
         return handle_error_response(HTTP_STATUS::FORBIDDEN);
@@ -123,8 +95,7 @@ function route_request_response(string $web_dir, string $request_path, array $ac
         return handle_error_response(HTTP_STATUS::NOT_FOUND);
     }
 
-    $extension = pathinfo($file_path, PATHINFO_EXTENSION);
-    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => $content_types[$extension] ?? 'application/octet-stream'];
+    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => mime_content_type($file_path) ?? 'application/octet-stream'];
 
     // Handle accepted encodings and static/on-the-fly gzip.
     if (in_array('gzip', $accepted_encodings, true)) {
@@ -143,10 +114,10 @@ function route_request_response(string $web_dir, string $request_path, array $ac
 /**
  * Dispatch request handling by HTTP method (GET, HEAD, or 405).
  */
-function handle_request_by_method(string $web_dir, array $request_context, array $content_types): array
+function handle_request_by_method(string $web_dir, array $request_context): array
 {
     $accepted_encodings = array_map('trim', explode(',', $request_context['headers']['accept-encoding'] ?? ''));
-    $resource_response = route_request_response($web_dir, $request_context['request_path'], $accepted_encodings, $content_types);
+    $resource_response = route_request_response($web_dir, $request_context['request_path'], $accepted_encodings);
 
     return match ($request_context['method']) {
         'GET' => $resource_response,
@@ -286,7 +257,6 @@ function read_request(\Socket $client): string|false
 function worker_process(
     \Socket $socket,
     string $web_dir,
-    array $content_types,
     int $keep_alive_max_requests,
     int $keep_alive_timeout
 ): void {
@@ -295,7 +265,7 @@ function worker_process(
         socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
         socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
 
-        handle_client_connection($client, $web_dir, $content_types, $keep_alive_max_requests, $keep_alive_timeout);
+        handle_client_connection($client, $web_dir, $keep_alive_max_requests, $keep_alive_timeout);
 
         socket_close($client);
     }
@@ -307,7 +277,6 @@ function worker_process(
 function handle_client_connection(
     \Socket $client,
     string $web_dir,
-    array $content_types,
     int $keep_alive_max_requests,
     int $keep_alive_timeout
 ): void {
@@ -326,7 +295,7 @@ function handle_client_connection(
         $request_headers = $request_context['headers'];
         $first_line = $request_context['first_line'];
 
-        [$status_code, $headers, $body] = handle_request_by_method($web_dir, $request_context, $content_types);
+        [$status_code, $headers, $body] = handle_request_by_method($web_dir, $request_context);
 
         // Determine connection persistence (HTTP/1.1 defaults to keep-alive per RFC 7230)
         $client_wants_keepalive = ! isset($request_headers['connection'])
@@ -389,7 +358,7 @@ function run_server(string $web_dir, ?int $worker_count): void
             $workers[] = $pid;
         } else {
             // Child process - become a worker
-            worker_process($sock, $web_dir, DEFAULT_CONTENT_TYPES, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT);
+            worker_process($sock, $web_dir, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT);
             exit(0);
         }
     }
