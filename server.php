@@ -8,7 +8,7 @@ require_once __DIR__ . '/src/cli.php';
 
 $config = load_config($argv, __DIR__);
 
-if($config['show_help']) {
+if ($config['show_help']) {
     echo cli_help_text();
     exit(0);
 }

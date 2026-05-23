@@ -438,7 +438,7 @@ function run_server(string $web_dir, ?int $worker_count, bool $cache_enabled = t
     } elseif (! is_readable($web_dir)) {
         logging('Warning: directory is not readable');
     }
-    logging(" Press Ctrl+C to stop the server");
+    logging(' Press Ctrl+C to stop the server');
 
     // Wait for all workers
     foreach ($workers as $worker_pid) {

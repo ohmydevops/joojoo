@@ -135,7 +135,7 @@ final class ServerFunctionsTest extends TestCase
                 'assertion' => static fn (string $type): bool => in_array($type, ['text/css', 'text/plain'], true),
             ],
             'font.woff2' => [
-                'content' => "wOF2" . str_repeat("\0", 32),
+                'content' => 'wOF2' . str_repeat("\0", 32),
                 'assertion' => static fn (string $type): bool => in_array(
                     $type,
                     ['font/woff2', 'application/font-woff2', 'application/octet-stream'],
