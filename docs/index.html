@@ -156,27 +156,24 @@ sequenceDiagram
         <!-- Quick Start Section -->
         <section id="quickstart" class="section">
             <h2>Quick Start</h2>
-            
             <h3>Local Usage</h3>
-            <pre><code>php server.php
-# or with custom directory
-BASE_WEB_DIR=/path/to/site php server.php
-# or set worker count
-WORKERS_COUNT=8 php server.php
-# or use CLI args
-php server.php --web-dir /path/to/site --workers-count 8</code></pre>
+            <pre><code>php server.php --web-dir /path/to/site</code></pre>
 
             <h3>Configuration</h3>
-            <p><strong>Environment Variables:</strong></p>
+            <p><strong>CLI Arguments:</strong></p>
             <ul>
-                <li><code>BASE_WEB_DIR</code> — Root directory for serving files (default: current directory)</li>
-                <li><code>WORKERS_COUNT</code> — Number of worker processes (default: CPU cores × 2)</li>
-            </ul>
-            <p><strong>CLI Arguments (take precedence over env vars):</strong></p>
-            <ul>
+                <li><code>-h, --help</code> — Show CLI usage help and exit</li>
                 <li><code>--web-dir PATH</code> — Set root directory for serving files</li>
                 <li><code>--workers-count N</code> — Set worker process count (must be >= 1)</li>
+                <li><code>--cache-enabled true|false</code> — Enable or disable <code>Cache-Control</code> response header</li>
             </ul>
+            <p><strong>Environment Variables:</strong></p>
+            <ul>
+                <li><code>BASE_WEB_DIR</code> — Environment variable for web root (used if <code>--web-dir</code> is not provided)</li>
+                <li><code>WORKERS_COUNT</code> — Environment variable for worker count (used if <code>--workers-count</code> is not provided)</li>
+                <li><code>CACHE_ENABLED=true|false</code> — Enable or disable <code>Cache-Control</code> response header</li>
+            </ul>
+            <p><strong>Precedence:</strong> CLI arguments override environment variables.</p>
 
             <h3>Docker</h3>
             <pre><code># Build
