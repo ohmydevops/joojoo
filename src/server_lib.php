@@ -17,6 +17,7 @@ const DEFAULT_RESPONSE_HEADERS = [
 enum HTTP_STATUS: string
 {
     case OK = '200';
+    case NOT_MODIFIED = '304';
     case FORBIDDEN = '403';
     case NOT_FOUND = '404';
     case METHOD_NOT_ALLOWED = '405';
@@ -84,6 +85,9 @@ function parse_request_context(string $request): array
     ];
 }
 
+/**
+ * Determine Content-Type based on file extension or MIME type detection.
+ */
 function content_type(string $file_path): string
 {
     static $finfo = null;
@@ -132,10 +136,61 @@ function content_type(string $file_path): string
 }
 
 /**
+ * Generate a representation-aware ETag based on file metadata.
+ */
+function generate_etag(string $file_path, string $representation = 'identity'): string
+{
+    $modification_time = filemtime($file_path) ?: 0;
+    $size = filesize($file_path) ?: 0;
+    $representation_hash = substr(sha1($representation), 0, 8);
+
+    return '"' . dechex($modification_time) . '-' . dechex($size) . '-' . $representation_hash . '"';
+}
+
+/**
+ * Normalize ETag token by trimming spaces and removing optional weak prefix.
+ */
+function normalize_etag_token(string $etag): string
+{
+    $etag = trim($etag);
+    if (str_starts_with($etag, 'W/')) {
+        $etag = substr($etag, 2);
+    }
+
+    return trim($etag);
+}
+
+/**
+ * Match If-None-Match header against current ETag using weak comparison rules.
+ */
+function etag_matches_if_none_match(string $if_none_match_header, string $current_etag): bool
+{
+    $header = trim($if_none_match_header);
+    if ($header === '') {
+        return false;
+    }
+
+    if ($header === '*') {
+        return true;
+    }
+
+    $normalized_current = normalize_etag_token($current_etag);
+    foreach (explode(',', $header) as $candidate) {
+        if (normalize_etag_token($candidate) === $normalized_current) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * Route request path to either static file response or error response.
  */
-function route_request_response(string $web_dir, string $request_path, array $accepted_encodings, bool $cache_enabled = true): array
+function route_request_response(string $web_dir, string $request_path, array $accepted_encodings, bool $cache_enabled = true, string $file_etag_sent_by_client = ''): array
 {
+    $headers = [...DEFAULT_RESPONSE_HEADERS];
+
     if (str_contains($request_path, "\0")) {
         return handle_error_response(HTTP_STATUS::FORBIDDEN);
     }
@@ -154,22 +209,41 @@ function route_request_response(string $web_dir, string $request_path, array $ac
         return handle_error_response(HTTP_STATUS::NOT_FOUND);
     }
 
-    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => content_type($file_path)];
+    $headers['Content-Type'] = content_type($file_path);
 
-    // Handle accepted encodings and static/on-the-fly gzip.
-    if (in_array('gzip', $accepted_encodings, true)) {
+    $client_accepts_gzip = in_array('gzip', $accepted_encodings, true);
+    $has_precompressed = is_readable($file_path . '.gz');
+    $uses_gzip_representation = $client_accepts_gzip;
+
+    // Set representation headers before conditional short-circuit.
+    if ($uses_gzip_representation) {
         $headers['Content-Encoding'] = 'gzip';
         $headers['Vary'] = 'Accept-Encoding';
-        $body = is_readable($file_path . '.gz')
-            ? file_get_contents($file_path . '.gz')
-            : gzencode(file_get_contents($file_path));
-    } else {
-        $body = file_get_contents($file_path);
     }
 
     // Handle Cache-Control for static assets unless disabled by config.
     if ($cache_enabled) {
         $headers['Cache-Control'] = cache_control_header(pathinfo($file_path, PATHINFO_EXTENSION));
+    }
+
+    // Handle ETag and If-None-Match
+    $representation_key = $uses_gzip_representation
+        ? ($has_precompressed ? 'gzip-static' : 'gzip-dynamic')
+        : 'identity';
+    $etag = generate_etag($file_path, $representation_key);
+    $headers['ETag'] = $etag;
+
+    if (etag_matches_if_none_match($file_etag_sent_by_client, $etag)) {
+        return [HTTP_STATUS::NOT_MODIFIED, $headers, ''];
+    }
+
+    // Handle accepted encodings and static/on-the-fly gzip body generation.
+    if ($uses_gzip_representation) {
+        $body = $has_precompressed
+            ? file_get_contents($file_path . '.gz')
+            : gzencode(file_get_contents($file_path));
+    } else {
+        $body = file_get_contents($file_path);
     }
 
     return [HTTP_STATUS::OK, $headers, $body];
@@ -181,14 +255,21 @@ function route_request_response(string $web_dir, string $request_path, array $ac
 function handle_request_by_method(string $web_dir, array $request_context, bool $cache_enabled = true): array
 {
     $accepted_encodings = array_map('trim', explode(',', $request_context['headers']['accept-encoding'] ?? ''));
-    $resource_response = route_request_response($web_dir, $request_context['request_path'], $accepted_encodings, $cache_enabled);
+    $file_etag_sent_by_client = trim($request_context['headers']['if-none-match'] ?? '');
+    $resource_response = route_request_response(
+        $web_dir,
+        $request_context['request_path'],
+        $accepted_encodings,
+        $cache_enabled,
+        $file_etag_sent_by_client,
+    );
 
     return match ($request_context['method']) {
         'GET' => $resource_response,
         'HEAD' => [
-            $resource_response[0],
-            [...$resource_response[1], 'Content-Length' => strlen($resource_response[2])],
-            '',
+        $resource_response[0],
+        [...$resource_response[1], 'Content-Length' => strlen($resource_response[2])],
+        '',
         ],
         default => handle_error_response(HTTP_STATUS::METHOD_NOT_ALLOWED, ['GET', 'HEAD']),
     };
@@ -256,6 +337,7 @@ function build_http_response(HTTP_STATUS $status_code, array $headers, string $b
 {
     $reasons = [
         HTTP_STATUS::OK->value => 'OK',
+        HTTP_STATUS::NOT_MODIFIED->value => 'Not Modified',
         HTTP_STATUS::FORBIDDEN->value => 'Forbidden',
         HTTP_STATUS::NOT_FOUND->value => 'Not Found',
         HTTP_STATUS::METHOD_NOT_ALLOWED->value => 'Method Not Allowed',
