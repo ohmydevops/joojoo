@@ -23,6 +23,16 @@ enum HTTP_STATUS: string
     case METHOD_NOT_ALLOWED = '405';
 }
 
+readonly class HttpResponse
+{
+    public function __construct(
+        public HTTP_STATUS $status,
+        public array $headers,
+        public string $body,
+    ) {
+    }
+}
+
 /**
  * Resolve the number of CPU cores for worker process sizing.
  */
@@ -42,7 +52,7 @@ function logging(string $message): void
     echo $message . PHP_EOL;
 }
 
-function cache_control_header(string $extension): string
+function get_cache_control(string $extension): string
 {
     $ext = strtolower($extension);
     $static = ['css', 'js', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'woff', 'woff2', 'ttf', 'webp'];
@@ -89,7 +99,7 @@ function parse_request_context(string $request): array
  * Determine Content-Type based on file extension or MIME type detection.
  * Source: https://svn.apache.org/repos/asf/httpd/httpd/trunk/docs/conf/mime.types
  */
-function content_type(string $file_path): string
+function get_content_type(string $file_path): string
 {
     static $finfo = null;
     static $extension_map = [
@@ -164,7 +174,7 @@ function normalize_etag_token(string $etag): string
 /**
  * Match If-None-Match header against current ETag using weak comparison rules.
  */
-function etag_matches_if_none_match(string $if_none_match_header, string $current_etag): bool
+function is_etag_match(string $if_none_match_header, string $current_etag): bool
 {
     $header = trim($if_none_match_header);
     if ($header === '') {
@@ -188,7 +198,7 @@ function etag_matches_if_none_match(string $if_none_match_header, string $curren
 /**
  * Route request path to either static file response or error response.
  */
-function route_request_response(string $web_dir, string $request_path, array $accepted_encodings, bool $cache_enabled = true, string $file_etag_sent_by_client = ''): array
+function resolve_file_response(string $web_dir, string $request_path, array $accepted_encodings, bool $cache_enabled = true, string $file_etag_sent_by_client = ''): HttpResponse
 {
     $headers = [...DEFAULT_RESPONSE_HEADERS];
 
@@ -210,7 +220,7 @@ function route_request_response(string $web_dir, string $request_path, array $ac
         return handle_error_response(HTTP_STATUS::NOT_FOUND);
     }
 
-    $headers['Content-Type'] = content_type($file_path);
+    $headers['Content-Type'] = get_content_type($file_path);
 
     $client_accepts_gzip = in_array('gzip', $accepted_encodings, true);
     $has_precompressed = is_readable($file_path . '.gz');
@@ -224,7 +234,7 @@ function route_request_response(string $web_dir, string $request_path, array $ac
 
     // Handle Cache-Control for static assets unless disabled by config.
     if ($cache_enabled) {
-        $headers['Cache-Control'] = cache_control_header(pathinfo($file_path, PATHINFO_EXTENSION));
+        $headers['Cache-Control'] = get_cache_control(pathinfo($file_path, PATHINFO_EXTENSION));
     }
 
     // Handle ETag and If-None-Match
@@ -234,8 +244,8 @@ function route_request_response(string $web_dir, string $request_path, array $ac
     $etag = generate_etag($file_path, $representation_key);
     $headers['ETag'] = $etag;
 
-    if (etag_matches_if_none_match($file_etag_sent_by_client, $etag)) {
-        return [HTTP_STATUS::NOT_MODIFIED, $headers, ''];
+    if (is_etag_match($file_etag_sent_by_client, $etag)) {
+        return new HttpResponse(HTTP_STATUS::NOT_MODIFIED, $headers, '');
     }
 
     // Handle accepted encodings and static/on-the-fly gzip body generation.
@@ -247,17 +257,17 @@ function route_request_response(string $web_dir, string $request_path, array $ac
         $body = file_get_contents($file_path);
     }
 
-    return [HTTP_STATUS::OK, $headers, $body];
+    return new HttpResponse(HTTP_STATUS::OK, $headers, $body);
 }
 
 /**
  * Dispatch request handling by HTTP method (GET, HEAD, or 405).
  */
-function handle_request_by_method(string $web_dir, array $request_context, bool $cache_enabled = true): array
+function dispatch_request(string $web_dir, array $request_context, bool $cache_enabled = true): HttpResponse
 {
     $accepted_encodings = array_map('trim', explode(',', $request_context['headers']['accept-encoding'] ?? ''));
     $file_etag_sent_by_client = trim($request_context['headers']['if-none-match'] ?? '');
-    $resource_response = route_request_response(
+    $resource_response = resolve_file_response(
         $web_dir,
         $request_context['request_path'],
         $accepted_encodings,
@@ -267,11 +277,11 @@ function handle_request_by_method(string $web_dir, array $request_context, bool 
 
     return match ($request_context['method']) {
         'GET' => $resource_response,
-        'HEAD' => [
-        $resource_response[0],
-        [...$resource_response[1], 'Content-Length' => strlen($resource_response[2])],
-        '',
-        ],
+        'HEAD' => new HttpResponse(
+            $resource_response->status,
+            [...$resource_response->headers, 'Content-Length' => strlen($resource_response->body)],
+            '',
+        ),
         default => handle_error_response(HTTP_STATUS::METHOD_NOT_ALLOWED, ['GET', 'HEAD']),
     };
 }
@@ -279,7 +289,7 @@ function handle_request_by_method(string $web_dir, array $request_context, bool 
 /**
  * Build a minimal HTML error response tuple for 403/404/405.
  */
-function handle_error_response(HTTP_STATUS $status, array $allowed_methods = []): array
+function handle_error_response(HTTP_STATUS $status, array $allowed_methods = []): HttpResponse
 {
     $messages = [
         HTTP_STATUS::FORBIDDEN->value => ['403 Forbidden', 'Access to this resource is not allowed.'],
@@ -297,13 +307,13 @@ function handle_error_response(HTTP_STATUS $status, array $allowed_methods = [])
         $headers['Allow'] = implode(', ', $allowed_methods);
     }
 
-    return [$status, $headers, $body];
+    return new HttpResponse($status, $headers, $body);
 }
 
 /**
  * Apply connection headers and determine whether this connection should close.
  */
-function apply_connection_policy(
+function apply_keepalive_policy(
     array $headers,
     bool $client_wants_keepalive,
     int $request_count,
@@ -444,12 +454,15 @@ function handle_client_connection(
         $request_headers = $request_context['headers'];
         $first_line = $request_context['first_line'];
 
-        [$status_code, $headers, $body] = handle_request_by_method($web_dir, $request_context, $cache_enabled);
+        $http_response = dispatch_request($web_dir, $request_context, $cache_enabled);
+        $status_code = $http_response->status;
+        $headers = $http_response->headers;
+        $body = $http_response->body;
 
         // Determine connection persistence (HTTP/1.1 defaults to keep-alive per RFC 7230)
         $client_wants_keepalive = ! isset($request_headers['connection'])
             || strtolower($request_headers['connection']) === 'keep-alive';
-        $connection_policy = apply_connection_policy(
+        $connection_policy = apply_keepalive_policy(
             $headers,
             $client_wants_keepalive,
             $request_count,
