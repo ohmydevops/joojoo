@@ -41,6 +41,18 @@ function logging(string $message): void
     echo $message . PHP_EOL;
 }
 
+function cache_control_header(string $extension): string
+{
+    $ext = strtolower($extension);
+    $static = ['css', 'js', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico', 'woff', 'woff2', 'ttf', 'webp'];
+
+    return match (true) {
+        $ext === 'html' => 'no-cache',
+        in_array($ext, $static, true) => 'public, max-age=86400',
+        default => 'no-cache',
+    };
+}
+
 /**
  * Parse request metadata (method, path, headers, first line) from a raw request.
  */
@@ -72,10 +84,57 @@ function parse_request_context(string $request): array
     ];
 }
 
+function content_type(string $file_path): string
+{
+    static $finfo = null;
+    static $extension_map = [
+        'css' => 'text/css',
+        'js' => 'text/javascript',
+        'html' => 'text/html; charset=utf-8',
+        'htm' => 'text/html; charset=utf-8',
+        'json' => 'application/json',
+        'svg' => 'image/svg+xml',
+        'woff' => 'font/woff',
+        'woff2' => 'font/woff2',
+        'ttf' => 'font/ttf',
+        'png' => 'image/png',
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'gif' => 'image/gif',
+        'ico' => 'image/x-icon',
+        'pdf' => 'application/pdf',
+        'txt' => 'text/plain',
+        'webp' => 'image/webp',
+        'zip' => 'application/zip',
+        'gz' => 'application/gzip',
+        'mp4' => 'video/mp4',
+        'mp3' => 'audio/mpeg',
+        'mkv' => 'video/x-matroska',
+    ];
+
+    $ext = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
+    if ($ext !== '' && isset($extension_map[$ext])) {
+        return $extension_map[$ext];
+    }
+
+    if ($finfo === null) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE) ?: false;
+    }
+
+    if ($finfo !== false) {
+        $type = finfo_file($finfo, $file_path);
+        if (is_string($type) && $type !== '') {
+            return $type;
+        }
+    }
+
+    return 'application/octet-stream';
+}
+
 /**
  * Route request path to either static file response or error response.
  */
-function route_request_response(string $web_dir, string $request_path, array $accepted_encodings): array
+function route_request_response(string $web_dir, string $request_path, array $accepted_encodings, bool $cache_enabled = true): array
 {
     if (str_contains($request_path, "\0")) {
         return handle_error_response(HTTP_STATUS::FORBIDDEN);
@@ -95,7 +154,7 @@ function route_request_response(string $web_dir, string $request_path, array $ac
         return handle_error_response(HTTP_STATUS::NOT_FOUND);
     }
 
-    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => mime_content_type($file_path) ?? 'application/octet-stream'];
+    $headers = [...DEFAULT_RESPONSE_HEADERS, 'Content-Type' => content_type($file_path)];
 
     // Handle accepted encodings and static/on-the-fly gzip.
     if (in_array('gzip', $accepted_encodings, true)) {
@@ -108,16 +167,21 @@ function route_request_response(string $web_dir, string $request_path, array $ac
         $body = file_get_contents($file_path);
     }
 
+    // Handle Cache-Control for static assets unless disabled by config.
+    if ($cache_enabled) {
+        $headers['Cache-Control'] = cache_control_header(pathinfo($file_path, PATHINFO_EXTENSION));
+    }
+
     return [HTTP_STATUS::OK, $headers, $body];
 }
 
 /**
  * Dispatch request handling by HTTP method (GET, HEAD, or 405).
  */
-function handle_request_by_method(string $web_dir, array $request_context): array
+function handle_request_by_method(string $web_dir, array $request_context, bool $cache_enabled = true): array
 {
     $accepted_encodings = array_map('trim', explode(',', $request_context['headers']['accept-encoding'] ?? ''));
-    $resource_response = route_request_response($web_dir, $request_context['request_path'], $accepted_encodings);
+    $resource_response = route_request_response($web_dir, $request_context['request_path'], $accepted_encodings, $cache_enabled);
 
     return match ($request_context['method']) {
         'GET' => $resource_response,
@@ -258,14 +322,15 @@ function worker_process(
     \Socket $socket,
     string $web_dir,
     int $keep_alive_max_requests,
-    int $keep_alive_timeout
+    int $keep_alive_timeout,
+    bool $cache_enabled
 ): void {
     while ($client = socket_accept($socket)) {
         // Configure timeouts for keep-alive
         socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
         socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
 
-        handle_client_connection($client, $web_dir, $keep_alive_max_requests, $keep_alive_timeout);
+        handle_client_connection($client, $web_dir, $keep_alive_max_requests, $keep_alive_timeout, $cache_enabled);
 
         socket_close($client);
     }
@@ -278,7 +343,8 @@ function handle_client_connection(
     \Socket $client,
     string $web_dir,
     int $keep_alive_max_requests,
-    int $keep_alive_timeout
+    int $keep_alive_timeout,
+    bool $cache_enabled
 ): void {
     $request_count = 0;
     $keep_connection = true;
@@ -295,7 +361,7 @@ function handle_client_connection(
         $request_headers = $request_context['headers'];
         $first_line = $request_context['first_line'];
 
-        [$status_code, $headers, $body] = handle_request_by_method($web_dir, $request_context);
+        [$status_code, $headers, $body] = handle_request_by_method($web_dir, $request_context, $cache_enabled);
 
         // Determine connection persistence (HTTP/1.1 defaults to keep-alive per RFC 7230)
         $client_wants_keepalive = ! isset($request_headers['connection'])
@@ -334,7 +400,7 @@ function handle_client_connection(
 /**
  * Start the prefork HTTP server.
  */
-function run_server(string $web_dir, ?int $worker_count): void
+function run_server(string $web_dir, ?int $worker_count, bool $cache_enabled = true): void
 {
     $workers = [];
     $sock = create_server_socket(HOST, PORT);
@@ -358,19 +424,21 @@ function run_server(string $web_dir, ?int $worker_count): void
             $workers[] = $pid;
         } else {
             // Child process - become a worker
-            worker_process($sock, $web_dir, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT);
+            worker_process($sock, $web_dir, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT, $cache_enabled);
             exit(0);
         }
     }
     logging('');
-    logging("\033[92m Server is running on " . HOST . ':' . PORT . ' with ' . $worker_count . ' workers. ' . "\033[0m");
-    logging("\033[92m Serving files from: " . $web_dir . "\033[0m");
-
+    logging("\033[92m Server is running on: \033[0mhttp://" . HOST . ':' . PORT);
+    logging("\033[92m Worker processes: \033[0m" . count($workers));
+    logging("\033[92m Cache headers: \033[0m" . ($cache_enabled ? 'enabled' : 'disabled'));
+    logging("\033[92m Serving files from: \033[0m" . $web_dir);
     if (! is_dir($web_dir)) {
         logging('Warning: directory does not exist');
     } elseif (! is_readable($web_dir)) {
         logging('Warning: directory is not readable');
     }
+    logging(" Press Ctrl+C to stop the server");
 
     // Wait for all workers
     foreach ($workers as $worker_pid) {

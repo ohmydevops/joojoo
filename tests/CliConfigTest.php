@@ -15,6 +15,7 @@ final class CliConfigTest extends TestCase
 
         $this->assertNull($config['web_dir']);
         $this->assertNull($config['workers_count']);
+        $this->assertNull($config['cache_enabled']);
     }
 
     public function test_parse_cli_arguments_web_dir(): void
@@ -24,6 +25,7 @@ final class CliConfigTest extends TestCase
 
         $this->assertSame('/path/to/site', $config['web_dir']);
         $this->assertNull($config['workers_count']);
+        $this->assertNull($config['cache_enabled']);
     }
 
     public function test_parse_cli_arguments_workers_count(): void
@@ -33,6 +35,15 @@ final class CliConfigTest extends TestCase
 
         $this->assertNull($config['web_dir']);
         $this->assertSame(8, $config['workers_count']);
+        $this->assertNull($config['cache_enabled']);
+    }
+
+    public function test_parse_cli_arguments_cache_enabled_false(): void
+    {
+        $argv = ['server.php', '--cache-enabled', 'false'];
+        $config = parse_cli_arguments($argv);
+
+        $this->assertFalse($config['cache_enabled']);
     }
 
     public function test_parse_cli_arguments_both_options(): void
@@ -66,6 +77,7 @@ final class CliConfigTest extends TestCase
 
         $this->assertSame($default_dir, $config['web_dir']);
         $this->assertNull($config['worker_count']);
+        $this->assertTrue($config['cache_enabled']);
     }
 
     public function test_load_config_cli_args_override_defaults(): void
@@ -77,12 +89,14 @@ final class CliConfigTest extends TestCase
 
         $this->assertSame('docs', $config['web_dir']);
         $this->assertSame(6, $config['worker_count']);
+        $this->assertTrue($config['cache_enabled']);
     }
 
     public function test_load_config_env_var_precedence(): void
     {
         $_ENV['BASE_WEB_DIR'] = '/env/web';
         $_ENV['WORKERS_COUNT'] = 12;
+        $_ENV['CACHE_ENABLED'] = 'false';
 
         $argv = ['server.php'];
 
@@ -90,33 +104,39 @@ final class CliConfigTest extends TestCase
 
         $this->assertSame('/env/web', $config['web_dir']);
         $this->assertSame(12, $config['worker_count']);
+        $this->assertFalse($config['cache_enabled']);
 
         // Cleanup
         unset($_ENV['BASE_WEB_DIR']);
         unset($_ENV['WORKERS_COUNT']);
+        unset($_ENV['CACHE_ENABLED']);
     }
 
     public function test_load_config_cli_overrides_env(): void
     {
         $_ENV['BASE_WEB_DIR'] = '/env/web';
         $_ENV['WORKERS_COUNT'] = 12;
+        $_ENV['CACHE_ENABLED'] = 'true';
 
-        $argv = ['server.php', '--web-dir', '/cli/web', '--workers-count', '4'];
+        $argv = ['server.php', '--web-dir', '/cli/web', '--workers-count', '4', '--cache-enabled', 'false'];
 
         $config = load_config($argv, '/default');
 
         $this->assertSame('/cli/web', $config['web_dir']);
         $this->assertSame(4, $config['worker_count']);
+        $this->assertFalse($config['cache_enabled']);
 
         // Cleanup
         unset($_ENV['BASE_WEB_DIR']);
         unset($_ENV['WORKERS_COUNT']);
+        unset($_ENV['CACHE_ENABLED']);
     }
 
     public function test_load_config_cli_overrides_env_partially(): void
     {
         $_ENV['BASE_WEB_DIR'] = '/env/web';
         $_ENV['WORKERS_COUNT'] = 12;
+        $_ENV['CACHE_ENABLED'] = 'false';
 
         $argv = ['server.php', '--workers-count', '3'];
 
@@ -124,9 +144,22 @@ final class CliConfigTest extends TestCase
 
         $this->assertSame('/env/web', $config['web_dir']);
         $this->assertSame(3, $config['worker_count']);
+        $this->assertFalse($config['cache_enabled']);
 
         // Cleanup
         unset($_ENV['BASE_WEB_DIR']);
         unset($_ENV['WORKERS_COUNT']);
+        unset($_ENV['CACHE_ENABLED']);
+    }
+
+    public function test_load_config_accepts_ture_for_cache_enabled_env(): void
+    {
+        $_ENV['CACHE_ENABLED'] = 'ture';
+
+        $config = load_config(['server.php'], '/default');
+
+        $this->assertTrue($config['cache_enabled']);
+
+        unset($_ENV['CACHE_ENABLED']);
     }
 }
