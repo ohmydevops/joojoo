@@ -87,6 +87,7 @@ function parse_request_context(string $request): array
 
 /**
  * Determine Content-Type based on file extension or MIME type detection.
+ * Source: https://svn.apache.org/repos/asf/httpd/httpd/trunk/docs/conf/mime.types
  */
 function content_type(string $file_path): string
 {
