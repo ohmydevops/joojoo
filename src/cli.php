@@ -6,6 +6,7 @@ declare(strict_types=1);
  * Parse CLI arguments into a configuration array.
  *
  * Supports:
+ * - -h, --help: Show usage help and exit
  * - --web-dir PATH: Set the web root directory
  * - --workers-count N: Set worker process count (must be >= 1)
  * - --cache-enabled true|false: Enable or disable Cache-Control response header
@@ -13,7 +14,7 @@ declare(strict_types=1);
  *
  * @param array $argv Command-line arguments
  *
- * @return array{web_dir: string|null, workers_count: int|null, cache_enabled: bool|null}
+ * @return array{web_dir: string|null, workers_count: int|null, cache_enabled: bool|null, show_help: bool}
  */
 function parse_cli_arguments(array $argv): array
 {
@@ -21,9 +22,14 @@ function parse_cli_arguments(array $argv): array
         'web_dir' => null,
         'workers_count' => null,
         'cache_enabled' => null,
+        'show_help' => false,
     ];
 
     foreach ($argv as $i => $arg) {
+        if ($arg === '--help' || $arg === '-h') {
+            $config['show_help'] = true;
+        }
+
         if ($arg === '--web-dir' && isset($argv[$i + 1])) {
             $config['web_dir'] = $argv[$i + 1];
         }
@@ -43,6 +49,27 @@ function parse_cli_arguments(array $argv): array
     }
 
     return $config;
+}
+
+/**
+ * Build CLI usage text.
+ */
+function cli_help_text(): string
+{
+    return "Usage: php server.php [options]\n"
+        . "\n"
+        . "Options:\n"
+        . "  -h, --help                    Show this help and exit\n"
+        . "  --web-dir PATH                Set root directory for serving files\n"
+        . "  --workers-count N             Set worker process count (must be >= 1)\n"
+        . "  --cache-enabled true|false    Enable or disable Cache-Control header\n"
+        . "\n"
+        . "Environment variables:\n"
+        . "  BASE_WEB_DIR                  Root directory for serving files\n"
+        . "  WORKERS_COUNT                 Worker process count\n"
+        . "  CACHE_ENABLED=true|false      Enable or disable Cache-Control header\n"
+        . "\n"
+        . "Precedence: CLI arguments override environment variables.\n";
 }
 
 /**
@@ -97,6 +124,7 @@ function load_config(array $argv, ?string $default_web_dir = null): array
         'web_dir' => $web_dir,
         'worker_count' => $worker_count,
         'cache_enabled' => $cache_enabled,
+        'show_help' => $cli_config['show_help'],
     ];
 }
 

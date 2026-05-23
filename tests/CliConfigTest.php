@@ -16,6 +16,23 @@ final class CliConfigTest extends TestCase
         $this->assertNull($config['web_dir']);
         $this->assertNull($config['workers_count']);
         $this->assertNull($config['cache_enabled']);
+        $this->assertFalse($config['show_help']);
+    }
+
+    public function test_parse_cli_arguments_help_long_flag(): void
+    {
+        $argv = ['server.php', '--help'];
+        $config = parse_cli_arguments($argv);
+
+        $this->assertTrue($config['show_help']);
+    }
+
+    public function test_parse_cli_arguments_help_short_flag(): void
+    {
+        $argv = ['server.php', '-h'];
+        $config = parse_cli_arguments($argv);
+
+        $this->assertTrue($config['show_help']);
     }
 
     public function test_parse_cli_arguments_web_dir(): void
@@ -161,5 +178,16 @@ final class CliConfigTest extends TestCase
         $this->assertTrue($config['cache_enabled']);
 
         unset($_ENV['CACHE_ENABLED']);
+    }
+
+    public function test_cli_help_text_contains_main_options(): void
+    {
+        $help = cli_help_text();
+
+        $this->assertStringContainsString('--help', $help);
+        $this->assertStringContainsString('--web-dir', $help);
+        $this->assertStringContainsString('--workers-count', $help);
+        $this->assertStringContainsString('--cache-enabled', $help);
+        $this->assertStringContainsString('CACHE_ENABLED', $help);
     }
 }
