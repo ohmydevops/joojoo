@@ -162,4 +162,121 @@ final class ServerFunctionsTest extends TestCase
             rmdir($tempDir);
         }
     }
+
+    public function test_response_includes_etag_header(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/index.html';
+        file_put_contents($filePath, '<html><body>etag</body></html>');
+
+        try {
+            [$status, $headers, $body] = route_request_response(
+                $tempDir,
+                '/index.html',
+                []
+            );
+
+            $this->assertSame(HTTP_STATUS::OK, $status);
+            $this->assertNotEmpty($body);
+            $this->assertArrayHasKey('ETag', $headers);
+            $this->assertMatchesRegularExpression('/^"[0-9a-f]+-[0-9a-f]+-[0-9a-f]+"$/', $headers['ETag']);
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_if_none_match_returns_not_modified(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/index.html';
+        file_put_contents($filePath, '<html><body>etag</body></html>');
+
+        try {
+            [, $initialHeaders] = route_request_response(
+                $tempDir,
+                '/index.html',
+                []
+            );
+
+            $requestContext = [
+                'method' => 'GET',
+                'request_path' => '/index.html',
+                'headers' => [
+                    'if-none-match' => $initialHeaders['ETag'],
+                ],
+            ];
+
+            [$status, $headers, $body] = handle_request_by_method($tempDir, $requestContext);
+
+            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $status);
+            $this->assertSame('', $body);
+            $this->assertSame($initialHeaders['ETag'], $headers['ETag']);
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_if_none_match_wildcard_returns_not_modified(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/index.html';
+        file_put_contents($filePath, '<html><body>wildcard</body></html>');
+
+        try {
+            $requestContext = [
+                'method' => 'GET',
+                'request_path' => '/index.html',
+                'headers' => [
+                    'if-none-match' => '*',
+                ],
+            ];
+
+            [$status, $headers, $body] = handle_request_by_method($tempDir, $requestContext);
+
+            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $status);
+            $this->assertSame('', $body);
+            $this->assertArrayHasKey('ETag', $headers);
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_if_none_match_multiple_values_and_weak_tag_returns_not_modified(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/index.html';
+        file_put_contents($filePath, '<html><body>multi</body></html>');
+
+        try {
+            [, $initialHeaders] = route_request_response(
+                $tempDir,
+                '/index.html',
+                []
+            );
+
+            $requestContext = [
+                'method' => 'GET',
+                'request_path' => '/index.html',
+                'headers' => [
+                    'if-none-match' => '"non-match", W/' . $initialHeaders['ETag'],
+                ],
+            ];
+
+            [$status, $headers, $body] = handle_request_by_method($tempDir, $requestContext);
+
+            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $status);
+            $this->assertSame('', $body);
+            $this->assertSame($initialHeaders['ETag'], $headers['ETag']);
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
 }

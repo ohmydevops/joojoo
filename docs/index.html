@@ -93,12 +93,12 @@
             <h2>Development Roadmap</h2>
             <div class="mermaid roadmap-chart">
 graph LR
-    A["✓ Core"] --> B["✓ Keep-Alive"] --> C["✓ Gzip"] --> D["→ Cache"] --> E["→ Range"] --> F["→ SSL"]
+    A["✓ Core"] --> B["✓ Keep-Alive"] --> C["✓ Gzip"] --> D["✓ Cache-Control + ETag"] --> E["→ Range"] --> F["→ SSL"]
 
     style A fill:#90EE90
     style B fill:#90EE90
     style C fill:#90EE90
-    style D fill:#FFE4B5
+    style D fill:#90EE90
     style E fill:#FFE4B5
     style F fill:#FFE4B5
             </div>
@@ -119,7 +119,11 @@ graph TD
     W1 --> L["Accept and Handle Client Connections"]
     W2 --> L
     WN --> L
-    L --> K["Keep-Alive Reuse\n(timeout/max requests)"]
+    L --> H["Resolve Content-Type"]
+    H --> C1["Cache policy\n(CACHE_ENABLED)"]
+    C1 --> E1["Generate ETag"]
+    E1 --> R1["If-None-Match check\n(304 or 200)"]
+    R1 --> K["Keep-Alive Reuse\n(timeout/max requests)"]
             </div>
 
             <h3>Request Flow</h3>
@@ -129,10 +133,20 @@ sequenceDiagram
     participant Worker
     participant FileSystem
     
-    Client->>Worker: HTTP GET /index.html (+/- Accept-Encoding: gzip)
-    Worker->>Worker: Parse headers, path, and accepted encodings
+    Client->>Worker: HTTP GET /index.html (+/- Accept-Encoding, If-None-Match)
+    Worker->>Worker: Parse path + headers
     Worker->>FileSystem: Check if file exists
     FileSystem-->>Worker: File found
+    Worker->>Worker: Resolve Content-Type
+    Worker->>Worker: Build ETag from mtime+size
+    alt ETag matches If-None-Match
+        Worker-->>Client: HTTP/1.1 304 Not Modified + ETag
+    else ETag does not match
+        alt Cache enabled
+            Worker->>Worker: Set Cache-Control
+        else Cache disabled
+            Worker->>Worker: Skip Cache-Control
+        end
     alt Client accepts gzip
         Worker->>FileSystem: Check if /index.html.gz exists
         alt Precompressed file exists
@@ -146,9 +160,9 @@ sequenceDiagram
     else Client does not accept gzip
         Worker->>Worker: Send original uncompressed file
     end
-    Worker->>Worker: Read Content-Type
-    Worker->>Worker: Set Content-Length
+    Worker->>Worker: Set ETag and Content-Length
     Worker-->>Client: HTTP/1.1 200 OK + file
+    end
     Worker->>Worker: Keep-alive: reuse connection
             </div>
         </section>
