@@ -109,7 +109,9 @@ graph LR
             <h2>How It Works</h2>
             
             <h3>Architecture</h3>
-            <div class="mermaid">
+            <details class="chart-collapsible">
+                <summary>Show architecture diagram</summary>
+                <div class="mermaid">
 graph TD
     A["Master Process"] --> B["Create Server Socket"]
     B --> C["Prefork Workers"]
@@ -124,10 +126,13 @@ graph TD
     C1 --> E1["Generate ETag"]
     E1 --> R1["If-None-Match check\n(304 or 200)"]
     R1 --> K["Keep-Alive Reuse\n(timeout/max requests)"]
-            </div>
+                </div>
+            </details>
 
             <h3>Request Flow</h3>
-            <div class="mermaid">
+            <details class="chart-collapsible">
+                <summary>Show request flow diagram</summary>
+                <div class="mermaid">
 sequenceDiagram
     participant Client
     participant Worker
@@ -164,7 +169,8 @@ sequenceDiagram
     Worker-->>Client: HTTP/1.1 200 OK + file
     end
     Worker->>Worker: Keep-alive: reuse connection
-            </div>
+                </div>
+            </details>
         </section>
 
         <!-- Quick Start Section -->

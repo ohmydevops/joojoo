@@ -264,6 +264,61 @@ li {
     overflow-x: auto;
 }
 
+.chart-collapsible {
+    margin: 16px 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fafafa;
+}
+
+.chart-collapsible > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 0.93rem;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    user-select: none;
+}
+
+.chart-collapsible > summary::marker {
+    content: "";
+}
+
+.chart-collapsible > summary::-webkit-details-marker {
+    display: none;
+}
+
+.chart-collapsible > summary::before {
+    content: "+";
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--accent);
+    font-size: 1rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.chart-collapsible[open] > summary::before {
+    content: "-";
+}
+
+.chart-collapsible > .mermaid {
+    margin: 0;
+    border-top: 1px solid var(--border);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
 svg {
     max-width: 100%;
 }
