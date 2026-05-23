@@ -43,6 +43,15 @@ fi
 # Start joojoo server serving the benchmark directory
 # -------------------------------------------------------------------
 start_server() {
+    # Clean up any stale processes still holding the port
+    local stale
+    stale=$(lsof -ti :8000 -sTCP:LISTEN 2>/dev/null) || true
+    if [[ -n "$stale" ]]; then
+        echo -e "${YELLOW}Port 8000 already in use — killing stale processes...${RESET}"
+        echo "$stale" | xargs kill 2>/dev/null || true
+        sleep 0.5
+    fi
+
     echo -e "${CYAN}Starting joojoo server on ${HOST} (serving: ${SCRIPT_DIR})...${RESET}"
     php "$SCRIPT_DIR/../server.php" --web-dir "$SCRIPT_DIR" >/dev/null 2>&1 &
     SERVER_PID=$!
@@ -62,8 +71,10 @@ start_server() {
 
 stop_server() {
     if [[ -n "$SERVER_PID" ]]; then
+        # Kill forked worker children first, then the parent
+        pkill -P "$SERVER_PID" 2>/dev/null || true
         kill "$SERVER_PID" 2>/dev/null || true
-        echo -e "${CYAN}Server stopped (pid=$SERVER_PID)${RESET}"
+        echo -e "${CYAN}Server stopped (pid=$SERVER_PID + workers)${RESET}"
     fi
 }
 
