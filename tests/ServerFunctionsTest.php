@@ -16,53 +16,42 @@ final class ServerFunctionsTest extends TestCase
 
         $context = parse_request_context($request);
 
-        $this->assertSame('GET /sample-website/index.html HTTP/1.1', $context['first_line']);
-        $this->assertSame('/sample-website/index.html', $context['request_path']);
-        $this->assertSame('localhost:8000', $context['headers']['host']);
-        $this->assertSame('keep-alive', strtolower($context['headers']['connection']));
+        $this->assertSame('GET /sample-website/index.html HTTP/1.1', $context->first_line);
+        $this->assertSame('/sample-website/index.html', $context->path);
+        $this->assertSame('localhost:8000', $context->headers['host']);
+        $this->assertSame('keep-alive', strtolower($context->headers['connection']));
     }
 
-    public function test_apply_connection_policy_closes_when_max_reached(): void
+    public function test_connection_closes_when_max_requests_reached(): void
     {
-        $result = apply_connection_policy(
-            DEFAULT_RESPONSE_HEADERS,
-            true,
-            100,
-            100,
-            5
-        );
+        $request = new HttpRequest('GET', '/docs/index.html', 'GET /docs/index.html HTTP/1.1', []);
 
-        $this->assertFalse($result['keep_connection']);
-        $this->assertSame('close', $result['headers']['Connection']);
+        $result = create_response(dirname(__DIR__), $request, 100, 100, 5, false);
+
+        $this->assertSame('close', $result->headers['Connection']);
     }
 
     public function test_head_request_returns_empty_body_and_content_length(): void
     {
-        $requestContext = [
-            'method' => 'HEAD',
-            'request_path' => '/docs/index.html',
-        ];
+        $request = new HttpRequest('HEAD', '/docs/index.html', 'HEAD /docs/index.html HTTP/1.1', []);
 
-        [$status, $headers, $body] = handle_request_by_method(
-            dirname(__DIR__),
-            $requestContext,
-        );
+        $response = create_response(dirname(__DIR__), $request, 1, 100, 5, false);
 
-        $this->assertSame(HTTP_STATUS::OK, $status);
-        $this->assertSame('', $body);
-        $this->assertArrayHasKey('Content-Length', $headers);
-        $this->assertGreaterThan(0, (int) $headers['Content-Length']);
+        $this->assertSame(HTTP_STATUS::OK, $response->status);
+        $this->assertSame('', $response->body);
+        $this->assertArrayHasKey('Content-Length', $response->headers);
+        $this->assertGreaterThan(0, (int) $response->headers['Content-Length']);
     }
 
     public function test_path_traversal_returns_forbidden(): void
     {
-        [$status] = route_request_response(
+        $response = resolve_file_response(
             dirname(__DIR__),
             '/../composer.json',
             [],
         );
 
-        $this->assertSame(HTTP_STATUS::FORBIDDEN, $status);
+        $this->assertSame(HTTP_STATUS::FORBIDDEN, $response->status);
     }
 
     public function test_gzip_response_sets_encoding_and_is_decodable(): void
@@ -74,16 +63,16 @@ final class ServerFunctionsTest extends TestCase
         file_put_contents($filePath, $originalBody);
 
         try {
-            [$status, $headers, $body] = route_request_response(
+            $response = resolve_file_response(
                 $tempDir,
                 '/sample.txt',
                 ['gzip'],
             );
 
-            $this->assertSame(HTTP_STATUS::OK, $status);
-            $this->assertSame('gzip', $headers['Content-Encoding']);
-            $this->assertSame('Accept-Encoding', $headers['Vary']);
-            $this->assertSame($originalBody, gzdecode($body));
+            $this->assertSame(HTTP_STATUS::OK, $response->status);
+            $this->assertSame('gzip', $response->headers['Content-Encoding']);
+            $this->assertSame('Accept-Encoding', $response->headers['Vary']);
+            $this->assertSame($originalBody, gzdecode($response->body));
         } finally {
             unlink($filePath);
             rmdir($tempDir);
@@ -99,21 +88,21 @@ final class ServerFunctionsTest extends TestCase
         file_put_contents($filePath, $originalBody);
 
         try {
-            [, , $plainBody] = route_request_response(
+            $plainResponse = resolve_file_response(
                 $tempDir,
                 '/sample.txt',
                 [],
             );
 
-            [, $gzipHeaders, $gzipBody] = route_request_response(
+            $gzipResponse = resolve_file_response(
                 $tempDir,
                 '/sample.txt',
                 ['gzip'],
             );
 
-            $this->assertSame('gzip', $gzipHeaders['Content-Encoding']);
-            $this->assertLessThan(strlen($plainBody), strlen($gzipBody));
-            $this->assertSame($plainBody, gzdecode($gzipBody));
+            $this->assertSame('gzip', $gzipResponse->headers['Content-Encoding']);
+            $this->assertLessThan(strlen($plainResponse->body), strlen($gzipResponse->body));
+            $this->assertSame($plainResponse->body, gzdecode($gzipResponse->body));
         } finally {
             unlink($filePath);
             rmdir($tempDir);
@@ -152,9 +141,9 @@ final class ServerFunctionsTest extends TestCase
             foreach ($cases as $filename => $case) {
                 file_put_contents("$tempDir/$filename", $case['content']);
 
-                [, $headers] = route_request_response($tempDir, "/$filename", []);
+                $response = resolve_file_response($tempDir, "/$filename", []);
 
-                $this->assertTrue(($case['assertion'])($headers['Content-Type']), "Failed for $filename");
+                $this->assertTrue(($case['assertion'])($response->headers['Content-Type']), "Failed for $filename");
 
                 unlink("$tempDir/$filename");
             }
@@ -171,16 +160,16 @@ final class ServerFunctionsTest extends TestCase
         file_put_contents($filePath, '<html><body>etag</body></html>');
 
         try {
-            [$status, $headers, $body] = route_request_response(
+            $response = resolve_file_response(
                 $tempDir,
                 '/index.html',
                 []
             );
 
-            $this->assertSame(HTTP_STATUS::OK, $status);
-            $this->assertNotEmpty($body);
-            $this->assertArrayHasKey('ETag', $headers);
-            $this->assertMatchesRegularExpression('/^"[0-9a-f]+-[0-9a-f]+-[0-9a-f]+"$/', $headers['ETag']);
+            $this->assertSame(HTTP_STATUS::OK, $response->status);
+            $this->assertNotEmpty($response->body);
+            $this->assertArrayHasKey('ETag', $response->headers);
+            $this->assertMatchesRegularExpression('/^"[0-9a-f]+-[0-9a-f]+-[0-9a-f]+"$/', $response->headers['ETag']);
         } finally {
             unlink($filePath);
             rmdir($tempDir);
@@ -195,25 +184,24 @@ final class ServerFunctionsTest extends TestCase
         file_put_contents($filePath, '<html><body>etag</body></html>');
 
         try {
-            [, $initialHeaders] = route_request_response(
+            $initialResponse = resolve_file_response(
                 $tempDir,
                 '/index.html',
                 []
             );
 
-            $requestContext = [
-                'method' => 'GET',
-                'request_path' => '/index.html',
-                'headers' => [
-                    'if-none-match' => $initialHeaders['ETag'],
-                ],
-            ];
+            $requestContext = new HttpRequest(
+                'GET',
+                '/index.html',
+                'GET /index.html HTTP/1.1',
+                ['if-none-match' => $initialResponse->headers['ETag']],
+            );
 
-            [$status, $headers, $body] = handle_request_by_method($tempDir, $requestContext);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
 
-            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $status);
-            $this->assertSame('', $body);
-            $this->assertSame($initialHeaders['ETag'], $headers['ETag']);
+            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
+            $this->assertSame('', $response->body);
+            $this->assertSame($initialResponse->headers['ETag'], $response->headers['ETag']);
         } finally {
             unlink($filePath);
             rmdir($tempDir);
@@ -228,19 +216,18 @@ final class ServerFunctionsTest extends TestCase
         file_put_contents($filePath, '<html><body>wildcard</body></html>');
 
         try {
-            $requestContext = [
-                'method' => 'GET',
-                'request_path' => '/index.html',
-                'headers' => [
-                    'if-none-match' => '*',
-                ],
-            ];
+            $requestContext = new HttpRequest(
+                'GET',
+                '/index.html',
+                'GET /index.html HTTP/1.1',
+                ['if-none-match' => '*'],
+            );
 
-            [$status, $headers, $body] = handle_request_by_method($tempDir, $requestContext);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
 
-            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $status);
-            $this->assertSame('', $body);
-            $this->assertArrayHasKey('ETag', $headers);
+            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
+            $this->assertSame('', $response->body);
+            $this->assertArrayHasKey('ETag', $response->headers);
         } finally {
             unlink($filePath);
             rmdir($tempDir);
@@ -255,25 +242,24 @@ final class ServerFunctionsTest extends TestCase
         file_put_contents($filePath, '<html><body>multi</body></html>');
 
         try {
-            [, $initialHeaders] = route_request_response(
+            $initialResponse = resolve_file_response(
                 $tempDir,
                 '/index.html',
                 []
             );
 
-            $requestContext = [
-                'method' => 'GET',
-                'request_path' => '/index.html',
-                'headers' => [
-                    'if-none-match' => '"non-match", W/' . $initialHeaders['ETag'],
-                ],
-            ];
+            $requestContext = new HttpRequest(
+                'GET',
+                '/index.html',
+                'GET /index.html HTTP/1.1',
+                ['if-none-match' => '"non-match", W/' . $initialResponse->headers['ETag']],
+            );
 
-            [$status, $headers, $body] = handle_request_by_method($tempDir, $requestContext);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
 
-            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $status);
-            $this->assertSame('', $body);
-            $this->assertSame($initialHeaders['ETag'], $headers['ETag']);
+            $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
+            $this->assertSame('', $response->body);
+            $this->assertSame($initialResponse->headers['ETag'], $response->headers['ETag']);
         } finally {
             unlink($filePath);
             rmdir($tempDir);
