@@ -8,6 +8,15 @@ require_once __DIR__ . '/../src/server_lib.php';
 
 final class ServerFunctionsTest extends TestCase
 {
+    private function makeServerConfig(string $webDir): ServerConfig
+    {
+        return new ServerConfig(
+            webDir: $webDir,
+            keepAliveMaxRequests: 100,
+            keepAliveTimeout: 5,
+        );
+    }
+
     public function test_parse_request_context_extracts_headers_and_path(): void
     {
         $request = "GET /sample-website/index.html HTTP/1.1\r\n"
@@ -26,7 +35,7 @@ final class ServerFunctionsTest extends TestCase
     {
         $request = new HttpRequest('GET', '/docs/index.html', 'GET /docs/index.html HTTP/1.1', []);
 
-        $result = create_response(dirname(__DIR__), $request, 100, 100, 5);
+        $result = create_response($this->makeServerConfig(dirname(__DIR__)), $request, 100);
 
         $this->assertSame('close', $result->headers['Connection']);
     }
@@ -35,7 +44,7 @@ final class ServerFunctionsTest extends TestCase
     {
         $request = new HttpRequest('HEAD', '/docs/index.html', 'HEAD /docs/index.html HTTP/1.1', []);
 
-        $response = create_response(dirname(__DIR__), $request, 1, 100, 5);
+        $response = create_response($this->makeServerConfig(dirname(__DIR__)), $request, 1);
 
         $this->assertSame(HTTP_STATUS::OK, $response->status);
         $this->assertSame('', $response->body);
@@ -197,7 +206,7 @@ final class ServerFunctionsTest extends TestCase
                 ['if-none-match' => $initialResponse->headers['ETag']],
             );
 
-            $response = create_response($tempDir, $requestContext, 1, 100, 5);
+            $response = create_response($this->makeServerConfig($tempDir), $requestContext, 1);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
@@ -223,7 +232,7 @@ final class ServerFunctionsTest extends TestCase
                 ['if-none-match' => '*'],
             );
 
-            $response = create_response($tempDir, $requestContext, 1, 100, 5);
+            $response = create_response($this->makeServerConfig($tempDir), $requestContext, 1);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
@@ -255,7 +264,7 @@ final class ServerFunctionsTest extends TestCase
                 ['if-none-match' => '"non-match", W/' . $initialResponse->headers['ETag']],
             );
 
-            $response = create_response($tempDir, $requestContext, 1, 100, 5);
+            $response = create_response($this->makeServerConfig($tempDir), $requestContext, 1);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
