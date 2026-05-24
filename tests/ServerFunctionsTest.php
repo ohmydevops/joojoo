@@ -25,15 +25,15 @@ final class ServerFunctionsTest extends TestCase
     public function test_apply_keepalive_policy_closes_when_max_reached(): void
     {
         $result = apply_keepalive_policy(
-            DEFAULT_RESPONSE_HEADERS,
+            new HttpResponse(HTTP_STATUS::OK, DEFAULT_RESPONSE_HEADERS, ''),
             true,
             100,
             100,
             5
         );
 
-        $this->assertFalse($result['keep_connection']);
-        $this->assertSame('close', $result['headers']['Connection']);
+        $this->assertFalse($result[1]);
+        $this->assertSame('close', $result[0]->headers['Connection']);
     }
 
     public function test_head_request_returns_empty_body_and_content_length(): void

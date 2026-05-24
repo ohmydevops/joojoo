@@ -312,9 +312,13 @@ function handle_error_response(HTTP_STATUS $status, array $allowed_methods = [])
 
 /**
  * Apply connection headers and determine whether this connection should close.
+ *
+ * Also sets Content-Length if not already present.
+ *
+ * @return array{HttpResponse, bool}
  */
 function apply_keepalive_policy(
-    array $headers,
+    HttpResponse $response,
     bool $client_wants_keepalive,
     int $request_count,
     int $keep_alive_max_requests,
@@ -323,28 +327,30 @@ function apply_keepalive_policy(
     $should_close = ! $client_wants_keepalive || $request_count >= $keep_alive_max_requests;
 
     if ($should_close) {
-        return [
-            'headers' => [...$headers, 'Connection' => 'close'],
-            'keep_connection' => false,
+        $merged_headers = [...$response->headers, 'Connection' => 'close'];
+    } else {
+        $remaining_requests = $keep_alive_max_requests - $request_count;
+        $merged_headers = [
+            ...$response->headers,
+            'Connection' => 'Keep-Alive',
+            'Keep-Alive' => "timeout=$keep_alive_timeout, max=$remaining_requests",
         ];
     }
 
-    $remaining_requests = $keep_alive_max_requests - $request_count;
+    if (! isset($merged_headers['Content-Length'])) {
+        $merged_headers['Content-Length'] = strlen($response->body);
+    }
 
     return [
-        'headers' => [
-            ...$headers,
-            'Connection' => 'Keep-Alive',
-            'Keep-Alive' => "timeout=$keep_alive_timeout, max=$remaining_requests",
-        ],
-        'keep_connection' => true,
+        new HttpResponse($response->status, $merged_headers, $response->body),
+        ! $should_close,
     ];
 }
 
 /**
- * Build a full HTTP/1.1 response string from status, headers, and body.
+ * Build a full HTTP/1.1 response string from an HttpResponse.
  */
-function build_http_response(HTTP_STATUS $status_code, array $headers, string $body): string
+function build_http_response(HttpResponse $response): string
 {
     $reasons = [
         HTTP_STATUS::OK->value => 'OK',
@@ -353,14 +359,14 @@ function build_http_response(HTTP_STATUS $status_code, array $headers, string $b
         HTTP_STATUS::NOT_FOUND->value => 'Not Found',
         HTTP_STATUS::METHOD_NOT_ALLOWED->value => 'Method Not Allowed',
     ];
-    $status_line = $status_code->value . ' ' . ($reasons[$status_code->value] ?? 'Unknown');
+    $status_line = $response->status->value . ' ' . ($reasons[$response->status->value] ?? 'Unknown');
 
     $header_string = '';
-    foreach ($headers as $key => $value) {
+    foreach ($response->headers as $key => $value) {
         $header_string .= "$key: $value\r\n";
     }
 
-    return "HTTP/1.1 $status_line\r\n$header_string\r\n$body";
+    return "HTTP/1.1 $status_line\r\n$header_string\r\n{$response->body}";
 }
 
 /**
@@ -454,31 +460,22 @@ function handle_client_connection(
         $request_headers = $request_context['headers'];
         $first_line = $request_context['first_line'];
 
-        $http_response = dispatch_request($web_dir, $request_context, $cache_enabled);
-        $status_code = $http_response->status;
-        $headers = $http_response->headers;
-        $body = $http_response->body;
+        $response = dispatch_request($web_dir, $request_context, $cache_enabled);
 
         // Determine connection persistence (HTTP/1.1 defaults to keep-alive per RFC 7230)
         $client_wants_keepalive = ! isset($request_headers['connection'])
             || strtolower($request_headers['connection']) === 'keep-alive';
-        $connection_policy = apply_keepalive_policy(
-            $headers,
+        [$response, $keep_connection] = apply_keepalive_policy(
+            $response,
             $client_wants_keepalive,
             $request_count,
             $keep_alive_max_requests,
             $keep_alive_timeout
         );
-        $headers = $connection_policy['headers'];
-        $keep_connection = $connection_policy['keep_connection'];
-
-        if (! isset($headers['Content-Length'])) {
-            $headers['Content-Length'] = strlen($body);
-        }
 
         // Send response
-        $response = build_http_response($status_code, $headers, $body);
-        $bytes_written = @socket_write($client, $response, strlen($response));
+        $raw = build_http_response($response);
+        $bytes_written = @socket_write($client, $raw, strlen($raw));
 
         if ($bytes_written === false) {
             logging('Error writing to socket: ' . socket_strerror(socket_last_error($client)));
@@ -489,7 +486,7 @@ function handle_client_connection(
         socket_getpeername($client, $address);
         $pid = posix_getpid();
         $timestamp = date('d/M/Y:H:i:s O');
-        logging("[$pid] $address - - [$timestamp] \"$first_line\" $status_code->value " . $headers['Content-Length']);
+        logging("[$pid] $address - - [$timestamp] \"$first_line\" {$response->status->value} " . $response->headers['Content-Length']);
     }
 }
 
