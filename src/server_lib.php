@@ -11,7 +11,6 @@ define('KEEP_ALIVE_MAX_REQUESTS', 100);
 
 const DEFAULT_RESPONSE_HEADERS = [
     'Server' => 'joojoo',
-    'Connection' => 'Keep-alive',
 ];
 
 enum HTTP_STATUS: string
@@ -21,6 +20,17 @@ enum HTTP_STATUS: string
     case FORBIDDEN = '403';
     case NOT_FOUND = '404';
     case METHOD_NOT_ALLOWED = '405';
+
+    public function reason(): string
+    {
+        return match ($this) {
+            self::OK => 'OK',
+            self::NOT_MODIFIED => 'Not Modified',
+            self::FORBIDDEN => 'Forbidden',
+            self::NOT_FOUND => 'Not Found',
+            self::METHOD_NOT_ALLOWED => 'Method Not Allowed',
+        };
+    }
 }
 
 readonly class HttpResponse
@@ -29,6 +39,17 @@ readonly class HttpResponse
         public HTTP_STATUS $status,
         public array $headers,
         public string $body,
+    ) {
+    }
+}
+
+readonly class HttpRequest
+{
+    public function __construct(
+        public string $method,
+        public string $path,
+        public string $first_line,
+        public array $headers,
     ) {
     }
 }
@@ -67,17 +88,19 @@ function get_cache_control(string $extension): string
 /**
  * Parse request metadata (method, path, headers, first line) from a raw request.
  */
-function parse_request_context(string $request): array
+function parse_request_context(string $request): HttpRequest
 {
-    $lines = explode("\r\n", trim($request));
+    $trimmed = trim($request);
+    $lines = explode("\r\n", $trimmed);
     $first_line = $lines[0] ?? '';
-    $method = strtoupper(explode(' ', $first_line)[0] ?? 'GET');
-    $request_uri = explode(' ', $first_line)[1] ?? '/';
+    $first_line_parts = explode(' ', $first_line);
+    $method = strtoupper($first_line_parts[0] ?? 'GET');
+    $request_uri = $first_line_parts[1] ?? '/';
     $request_path = parse_url($request_uri, PHP_URL_PATH) ?? '/';
 
     $headers = [];
     foreach (array_slice($lines, 1) as $line) {
-        if (empty($line)) {
+        if ($line === '') {
             break;
         }
         if (! str_contains($line, ':')) {
@@ -87,12 +110,7 @@ function parse_request_context(string $request): array
         $headers[strtolower(trim($key))] = trim($value);
     }
 
-    return [
-        'method' => $method,
-        'first_line' => $first_line,
-        'headers' => $headers,
-        'request_path' => $request_path,
-    ];
+    return new HttpRequest($method, $request_path, $first_line, $headers);
 }
 
 /**
@@ -238,9 +256,10 @@ function resolve_file_response(string $web_dir, string $request_path, array $acc
     }
 
     // Handle ETag and If-None-Match
-    $representation_key = $uses_gzip_representation
-        ? ($has_precompressed ? 'gzip-static' : 'gzip-dynamic')
-        : 'identity';
+    $representation_key = 'identity';
+    if ($uses_gzip_representation) {
+        $representation_key = $has_precompressed ? 'gzip-static' : 'gzip-dynamic';
+    }
     $etag = generate_etag($file_path, $representation_key);
     $headers['ETag'] = $etag;
 
@@ -249,41 +268,15 @@ function resolve_file_response(string $web_dir, string $request_path, array $acc
     }
 
     // Handle accepted encodings and static/on-the-fly gzip body generation.
-    if ($uses_gzip_representation) {
-        $body = $has_precompressed
-            ? file_get_contents($file_path . '.gz')
-            : gzencode(file_get_contents($file_path));
+    if ($uses_gzip_representation && $has_precompressed) {
+        $body = file_get_contents($file_path . '.gz');
+    } elseif ($uses_gzip_representation) {
+        $body = gzencode(file_get_contents($file_path));
     } else {
         $body = file_get_contents($file_path);
     }
 
     return new HttpResponse(HTTP_STATUS::OK, $headers, $body);
-}
-
-/**
- * Dispatch request handling by HTTP method (GET, HEAD, or 405).
- */
-function dispatch_request(string $web_dir, array $request_context, bool $cache_enabled = true): HttpResponse
-{
-    $accepted_encodings = array_map('trim', explode(',', $request_context['headers']['accept-encoding'] ?? ''));
-    $file_etag_sent_by_client = trim($request_context['headers']['if-none-match'] ?? '');
-    $resource_response = resolve_file_response(
-        $web_dir,
-        $request_context['request_path'],
-        $accepted_encodings,
-        $cache_enabled,
-        $file_etag_sent_by_client,
-    );
-
-    return match ($request_context['method']) {
-        'GET' => $resource_response,
-        'HEAD' => new HttpResponse(
-            $resource_response->status,
-            [...$resource_response->headers, 'Content-Length' => strlen($resource_response->body)],
-            '',
-        ),
-        default => handle_error_response(HTTP_STATUS::METHOD_NOT_ALLOWED, ['GET', 'HEAD']),
-    };
 }
 
 /**
@@ -311,20 +304,38 @@ function handle_error_response(HTTP_STATUS $status, array $allowed_methods = [])
 }
 
 /**
- * Apply connection headers and determine whether this connection should close.
- *
- * Also sets Content-Length if not already present.
- *
- * @return array{HttpResponse, bool}
+ * Dispatch the request and apply connection headers.
  */
-function apply_keepalive_policy(
-    HttpResponse $response,
-    bool $client_wants_keepalive,
+function create_response(
+    string $web_dir,
+    HttpRequest $request,
     int $request_count,
     int $keep_alive_max_requests,
-    int $keep_alive_timeout
-): array {
-    $should_close = ! $client_wants_keepalive || $request_count >= $keep_alive_max_requests;
+    int $keep_alive_timeout,
+    bool $cache_enabled
+): HttpResponse {
+    $accept_encoding_header = $request->headers['accept-encoding'] ?? '';
+    $accepted_encodings = array_map('trim', explode(',', $accept_encoding_header));
+    $file_etag_sent_by_client = trim($request->headers['if-none-match'] ?? '');
+    $resource_response = resolve_file_response(
+        $web_dir,
+        $request->path,
+        $accepted_encodings,
+        $cache_enabled,
+        $file_etag_sent_by_client,
+    );
+
+    $response = match ($request->method) {
+        'GET' => $resource_response,
+        'HEAD' => new HttpResponse(
+            $resource_response->status,
+            [...$resource_response->headers, 'Content-Length' => strlen($resource_response->body)],
+            '',
+        ),
+        default => handle_error_response(HTTP_STATUS::METHOD_NOT_ALLOWED, ['GET', 'HEAD']),
+    };
+
+    $should_close = ! is_client_keepalive($request) || $request_count >= $keep_alive_max_requests;
 
     if ($should_close) {
         $merged_headers = [...$response->headers, 'Connection' => 'close'];
@@ -337,14 +348,7 @@ function apply_keepalive_policy(
         ];
     }
 
-    if (! isset($merged_headers['Content-Length'])) {
-        $merged_headers['Content-Length'] = strlen($response->body);
-    }
-
-    return [
-        new HttpResponse($response->status, $merged_headers, $response->body),
-        ! $should_close,
-    ];
+    return new HttpResponse($response->status, $merged_headers, $response->body);
 }
 
 /**
@@ -352,17 +356,15 @@ function apply_keepalive_policy(
  */
 function build_http_response(HttpResponse $response): string
 {
-    $reasons = [
-        HTTP_STATUS::OK->value => 'OK',
-        HTTP_STATUS::NOT_MODIFIED->value => 'Not Modified',
-        HTTP_STATUS::FORBIDDEN->value => 'Forbidden',
-        HTTP_STATUS::NOT_FOUND->value => 'Not Found',
-        HTTP_STATUS::METHOD_NOT_ALLOWED->value => 'Method Not Allowed',
-    ];
-    $status_line = $response->status->value . ' ' . ($reasons[$response->status->value] ?? 'Unknown');
+    $status_line = $response->status->value . ' ' . $response->status->reason();
+
+    $headers = $response->headers;
+    if (! isset($headers['Content-Length'])) {
+        $headers['Content-Length'] = strlen($response->body);
+    }
 
     $header_string = '';
-    foreach ($response->headers as $key => $value) {
+    foreach ($headers as $key => $value) {
         $header_string .= "$key: $value\r\n";
     }
 
@@ -414,25 +416,55 @@ function read_request(\Socket $client): string|false
     return $request;
 }
 
-/**
- * Accept clients in a worker process and hand each to the request loop.
- */
-function worker_process(
-    \Socket $socket,
-    string $web_dir,
-    int $keep_alive_max_requests,
-    int $keep_alive_timeout,
-    bool $cache_enabled
-): void {
-    while ($client = socket_accept($socket)) {
-        // Configure timeouts for keep-alive
-        socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
-        socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
-
-        handle_client_connection($client, $web_dir, $keep_alive_max_requests, $keep_alive_timeout, $cache_enabled);
-
-        socket_close($client);
+function startup_logging(string $web_dir, bool $cache_enabled, array $workers): void
+{
+    logging('');
+    logging("\033[92m 🐣 Joojoo is running on: \033[0mhttp://" . HOST . ':' . PORT);
+    logging("\033[92m Worker processes: \033[0m" . count($workers));
+    logging("\033[92m Cache headers: \033[0m" . ($cache_enabled ? 'enabled' : 'disabled'));
+    logging("\033[92m Serving files from: \033[0m" . $web_dir);
+    if (! is_dir($web_dir)) {
+        logging('Warning: directory does not exist');
+    } elseif (! is_readable($web_dir)) {
+        logging('Warning: directory is not readable');
     }
+    logging(' Press Ctrl+C to stop the server');
+}
+
+
+/**
+ * Return true if the client wants the connection kept alive (HTTP/1.1 default per RFC 7230).
+ */
+function is_client_keepalive(HttpRequest $request): bool
+{
+    return ! isset($request->headers['connection'])
+        || strtolower($request->headers['connection']) === 'keep-alive';
+}
+
+/**
+ * Write a raw HTTP response to the client socket.
+ * Returns false and logs an error if the write fails.
+ */
+function send_response(\Socket $client, string $raw): bool
+{
+    $bytes_written = @socket_write($client, $raw, strlen($raw));
+
+    if ($bytes_written === false) {
+        logging('Error writing to socket: ' . socket_strerror(socket_last_error($client)));
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Write one access log line for a completed request.
+ */
+function access_log(\Socket $client, string $first_line, string $status, int $content_length): void
+{
+    socket_getpeername($client, $address);
+    $timestamp = date('d/M/Y:H:i:s O');
+    logging("$address - - [$timestamp] \"$first_line\" $status $content_length");
 }
 
 /**
@@ -451,42 +483,56 @@ function handle_client_connection(
     while ($keep_connection && $request_count < $keep_alive_max_requests) {
         $request = read_request($client);
 
-        if ($request === false || empty($request)) {
+        if ($request === false || $request === '') {
             break;
         }
 
         $request_count++;
-        $request_context = parse_request_context($request);
-        $request_headers = $request_context['headers'];
-        $first_line = $request_context['first_line'];
-
-        $response = dispatch_request($web_dir, $request_context, $cache_enabled);
-
-        // Determine connection persistence (HTTP/1.1 defaults to keep-alive per RFC 7230)
-        $client_wants_keepalive = ! isset($request_headers['connection'])
-            || strtolower($request_headers['connection']) === 'keep-alive';
-        [$response, $keep_connection] = apply_keepalive_policy(
-            $response,
-            $client_wants_keepalive,
+        $http_request = parse_request_context($request);
+        $response = create_response(
+            $web_dir,
+            $http_request,
             $request_count,
             $keep_alive_max_requests,
-            $keep_alive_timeout
+            $keep_alive_timeout,
+            $cache_enabled
         );
+        $keep_connection = $response->headers['Connection'] === 'Keep-Alive';
 
-        // Send response
         $raw = build_http_response($response);
-        $bytes_written = @socket_write($client, $raw, strlen($raw));
-
-        if ($bytes_written === false) {
-            logging('Error writing to socket: ' . socket_strerror(socket_last_error($client)));
+        if (! send_response($client, $raw)) {
             break;
         }
 
-        // Log request
-        socket_getpeername($client, $address);
-        $pid = posix_getpid();
-        $timestamp = date('d/M/Y:H:i:s O');
-        logging("[$pid] $address - - [$timestamp] \"$first_line\" {$response->status->value} " . $response->headers['Content-Length']);
+        $content_length = $response->headers['Content-Length'] ?? strlen($response->body);
+        access_log($client, $http_request->first_line, $response->status->value, $content_length);
+    }
+}
+
+/**
+ * Accept clients in a worker process and hand each to the request loop.
+ */
+function worker_process(
+    \Socket $socket,
+    string $web_dir,
+    int $keep_alive_max_requests,
+    int $keep_alive_timeout,
+    bool $cache_enabled
+): void {
+    while ($client = socket_accept($socket)) {
+        // Configure timeouts for keep-alive
+        socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
+        socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
+
+        handle_client_connection(
+            client: $client,
+            web_dir: $web_dir,
+            keep_alive_max_requests: $keep_alive_max_requests,
+            keep_alive_timeout: $keep_alive_timeout,
+            cache_enabled: $cache_enabled
+        );
+
+        socket_close($client);
     }
 }
 
@@ -496,9 +542,28 @@ function handle_client_connection(
 function run_server(string $web_dir, ?int $worker_count, bool $cache_enabled = true): void
 {
     $workers = [];
-    $sock = create_server_socket(HOST, PORT);
+    $sock = socket_create(domain: AF_INET, type: SOCK_STREAM, protocol: SOL_TCP);
+
     if ($sock === false) {
         logging('Failed to create server socket: ' . socket_strerror(socket_last_error()));
+        exit(1);
+    }
+
+    if (! socket_set_option(socket: $sock, level:SOL_SOCKET, option:SO_REUSEADDR, value:1)) {
+        socket_close($sock);
+        logging('Failed to set socket option: ' . socket_strerror(socket_last_error($sock)));
+        exit(1);
+    }
+
+    if (! socket_bind(socket: $sock, address: HOST, port: PORT)) {
+        socket_close($sock);
+        logging('Failed to bind server socket: ' . socket_strerror(socket_last_error($sock)));
+        exit(1);
+    }
+
+    if (! socket_listen(socket: $sock, backlog: SOMAXCONN)) {
+        socket_close($sock);
+        logging('Failed to listen on server socket: ' . socket_strerror(socket_last_error($sock)));
         exit(1);
     }
 
@@ -508,33 +573,29 @@ function run_server(string $web_dir, ?int $worker_count, bool $cache_enabled = t
         $pid = pcntl_fork();
 
         if ($pid === -1) {
-            logging('Failed to fork worker process');
+            // Parent process failed to fork
+            logging('Failed to fork worker process: ' . pcntl_strerror(pcntl_get_last_error()));
             exit(1);
-        }
-
-        if ($pid) {
-            // Parent process
+        } elseif ($pid) {
+            // Parent process continues from here and keeps track of worker PIDs
             $workers[] = $pid;
         } else {
-            // Child process - become a worker
-            worker_process($sock, $web_dir, KEEP_ALIVE_MAX_REQUESTS, KEEP_ALIVE_TIMEOUT, $cache_enabled);
+            // Child process continues from here
+            worker_process(
+                socket: $sock,
+                web_dir: $web_dir,
+                keep_alive_max_requests: KEEP_ALIVE_MAX_REQUESTS,
+                keep_alive_timeout: KEEP_ALIVE_TIMEOUT,
+                cache_enabled: $cache_enabled
+            );
             exit(0);
         }
     }
-    logging('');
-    logging("\033[92m Server is running on: \033[0mhttp://" . HOST . ':' . PORT);
-    logging("\033[92m Worker processes: \033[0m" . count($workers));
-    logging("\033[92m Cache headers: \033[0m" . ($cache_enabled ? 'enabled' : 'disabled'));
-    logging("\033[92m Serving files from: \033[0m" . $web_dir);
-    if (! is_dir($web_dir)) {
-        logging('Warning: directory does not exist');
-    } elseif (! is_readable($web_dir)) {
-        logging('Warning: directory is not readable');
-    }
-    logging(' Press Ctrl+C to stop the server');
+    startup_logging($web_dir, $cache_enabled, $workers);
 
     // Wait for all workers
     foreach ($workers as $worker_pid) {
-        pcntl_waitpid($worker_pid, $status);
+        $wait_status = 0;
+        pcntl_waitpid($worker_pid, $wait_status);
     }
 }

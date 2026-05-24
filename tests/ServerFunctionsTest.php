@@ -16,37 +16,26 @@ final class ServerFunctionsTest extends TestCase
 
         $context = parse_request_context($request);
 
-        $this->assertSame('GET /sample-website/index.html HTTP/1.1', $context['first_line']);
-        $this->assertSame('/sample-website/index.html', $context['request_path']);
-        $this->assertSame('localhost:8000', $context['headers']['host']);
-        $this->assertSame('keep-alive', strtolower($context['headers']['connection']));
+        $this->assertSame('GET /sample-website/index.html HTTP/1.1', $context->first_line);
+        $this->assertSame('/sample-website/index.html', $context->path);
+        $this->assertSame('localhost:8000', $context->headers['host']);
+        $this->assertSame('keep-alive', strtolower($context->headers['connection']));
     }
 
-    public function test_apply_keepalive_policy_closes_when_max_reached(): void
+    public function test_connection_closes_when_max_requests_reached(): void
     {
-        $result = apply_keepalive_policy(
-            new HttpResponse(HTTP_STATUS::OK, DEFAULT_RESPONSE_HEADERS, ''),
-            true,
-            100,
-            100,
-            5
-        );
+        $request = new HttpRequest('GET', '/docs/index.html', 'GET /docs/index.html HTTP/1.1', []);
 
-        $this->assertFalse($result[1]);
-        $this->assertSame('close', $result[0]->headers['Connection']);
+        $result = create_response(dirname(__DIR__), $request, 100, 100, 5, false);
+
+        $this->assertSame('close', $result->headers['Connection']);
     }
 
     public function test_head_request_returns_empty_body_and_content_length(): void
     {
-        $requestContext = [
-            'method' => 'HEAD',
-            'request_path' => '/docs/index.html',
-        ];
+        $request = new HttpRequest('HEAD', '/docs/index.html', 'HEAD /docs/index.html HTTP/1.1', []);
 
-        $response = dispatch_request(
-            dirname(__DIR__),
-            $requestContext,
-        );
+        $response = create_response(dirname(__DIR__), $request, 1, 100, 5, false);
 
         $this->assertSame(HTTP_STATUS::OK, $response->status);
         $this->assertSame('', $response->body);
@@ -201,15 +190,14 @@ final class ServerFunctionsTest extends TestCase
                 []
             );
 
-            $requestContext = [
-                'method' => 'GET',
-                'request_path' => '/index.html',
-                'headers' => [
-                    'if-none-match' => $initialResponse->headers['ETag'],
-                ],
-            ];
+            $requestContext = new HttpRequest(
+                'GET',
+                '/index.html',
+                'GET /index.html HTTP/1.1',
+                ['if-none-match' => $initialResponse->headers['ETag']],
+            );
 
-            $response = dispatch_request($tempDir, $requestContext);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
@@ -228,15 +216,14 @@ final class ServerFunctionsTest extends TestCase
         file_put_contents($filePath, '<html><body>wildcard</body></html>');
 
         try {
-            $requestContext = [
-                'method' => 'GET',
-                'request_path' => '/index.html',
-                'headers' => [
-                    'if-none-match' => '*',
-                ],
-            ];
+            $requestContext = new HttpRequest(
+                'GET',
+                '/index.html',
+                'GET /index.html HTTP/1.1',
+                ['if-none-match' => '*'],
+            );
 
-            $response = dispatch_request($tempDir, $requestContext);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
@@ -261,15 +248,14 @@ final class ServerFunctionsTest extends TestCase
                 []
             );
 
-            $requestContext = [
-                'method' => 'GET',
-                'request_path' => '/index.html',
-                'headers' => [
-                    'if-none-match' => '"non-match", W/' . $initialResponse->headers['ETag'],
-                ],
-            ];
+            $requestContext = new HttpRequest(
+                'GET',
+                '/index.html',
+                'GET /index.html HTTP/1.1',
+                ['if-none-match' => '"non-match", W/' . $initialResponse->headers['ETag']],
+            );
 
-            $response = dispatch_request($tempDir, $requestContext);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
