@@ -70,7 +70,17 @@ readonly class HttpRequest
     }
 }
 
-function run_server(string $web_dir, ?int $worker_count): void
+readonly class ServerConfig
+{
+    public function __construct(
+        public string $webDir,
+        public int $keepAliveMaxRequests,
+        public int $keepAliveTimeout,
+    ) {
+    }
+}
+
+function run_server(ServerConfig $config, ?int $worker_count): void
 {
     $workers = [];
     $socket = socket_create(domain: AF_INET, type: SOCK_STREAM, protocol: SOL_TCP);
@@ -115,14 +125,12 @@ function run_server(string $web_dir, ?int $worker_count): void
 
         worker_process(
             socket: $socket,
-            web_dir: $web_dir,
-            keep_alive_max_requests: KEEP_ALIVE_MAX_REQUESTS,
-            keep_alive_timeout: KEEP_ALIVE_TIMEOUT
+            config: $config
         );
         exit(0);
     }
 
-    startup_logging($web_dir, $workers);
+    startup_logging($config->webDir, $workers);
 
     foreach ($workers as $worker_pid) {
         $wait_status = 0;
@@ -132,19 +140,15 @@ function run_server(string $web_dir, ?int $worker_count): void
 
 function worker_process(
     \Socket $socket,
-    string $web_dir,
-    int $keep_alive_max_requests,
-    int $keep_alive_timeout
+    ServerConfig $config
 ): void {
     while ($client = socket_accept($socket)) {
-        socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
-        socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $keep_alive_timeout, 'usec' => 0]);
+        socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $config->keepAliveTimeout, 'usec' => 0]);
+        socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $config->keepAliveTimeout, 'usec' => 0]);
 
         handle_client_connection(
             client: $client,
-            web_dir: $web_dir,
-            keep_alive_max_requests: $keep_alive_max_requests,
-            keep_alive_timeout: $keep_alive_timeout
+            config: $config
         );
 
         socket_close($client);
@@ -153,14 +157,12 @@ function worker_process(
 
 function handle_client_connection(
     \Socket $client,
-    string $web_dir,
-    int $keep_alive_max_requests,
-    int $keep_alive_timeout
+    ServerConfig $config,
 ): void {
     $request_count = 0;
     $keep_connection_open = true;
 
-    while ($keep_connection_open && $request_count < $keep_alive_max_requests) {
+    while ($keep_connection_open && $request_count < $config->keepAliveMaxRequests) {
         $raw_request = read_request($client);
         if ($raw_request === false || $raw_request === '') {
             break;
@@ -170,11 +172,9 @@ function handle_client_connection(
         $request = parse_request_context($raw_request);
 
         $response = create_response(
-            $web_dir,
-            $request,
-            $request_count,
-            $keep_alive_max_requests,
-            $keep_alive_timeout
+            config: $config,
+            request: $request,
+            request_count: $request_count
         );
 
         $keep_connection_open = $response->headers[HEADER_CONNECTION] === CONNECTION_KEEP_ALIVE;
@@ -190,17 +190,15 @@ function handle_client_connection(
 }
 
 function create_response(
-    string $web_dir,
+    ServerConfig $config,
     HttpRequest $request,
-    int $request_count,
-    int $keep_alive_max_requests,
-    int $keep_alive_timeout
+    int $request_count
 ): HttpResponse {
     $accepted_encodings = parse_accepted_encodings($request->headers['accept-encoding'] ?? '');
     $client_etag = trim($request->headers['if-none-match'] ?? '');
 
     $resource_response = resolve_file_response(
-        $web_dir,
+        $config->webDir,
         $request->path,
         $accepted_encodings,
         $client_etag
@@ -220,8 +218,8 @@ function create_response(
         $response,
         $request,
         $request_count,
-        $keep_alive_max_requests,
-        $keep_alive_timeout
+        $config->keepAliveMaxRequests,
+        $config->keepAliveTimeout
     );
 }
 
