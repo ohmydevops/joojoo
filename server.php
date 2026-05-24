@@ -15,6 +15,5 @@ if ($config['show_help']) {
 
 run_server(
     web_dir:$config['web_dir'],
-    worker_count:$config['worker_count'],
-    cache_enabled:$config['cache_enabled']
+    worker_count:$config['worker_count']
 );

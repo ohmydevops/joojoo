@@ -122,7 +122,7 @@ graph TD
     W2 --> L
     WN --> L
     L --> H["Resolve Content-Type"]
-    H --> C1["Cache policy\n(CACHE_ENABLED)"]
+    H --> C1["Cache-Control\n(always enabled)"]
     C1 --> E1["Generate ETag"]
     E1 --> R1["If-None-Match check\n(304 or 200)"]
     R1 --> K["Keep-Alive Reuse\n(timeout/max requests)"]
@@ -147,11 +147,7 @@ sequenceDiagram
     alt ETag matches If-None-Match
         Worker-->>Client: HTTP/1.1 304 Not Modified + ETag
     else ETag does not match
-        alt Cache enabled
-            Worker->>Worker: Set Cache-Control
-        else Cache disabled
-            Worker->>Worker: Skip Cache-Control
-        end
+        Worker->>Worker: Set Cache-Control
     alt Client accepts gzip
         Worker->>FileSystem: Check if /index.html.gz exists
         alt Precompressed file exists
@@ -185,13 +181,11 @@ sequenceDiagram
                 <li><code>-h, --help</code> — Show CLI usage help and exit</li>
                 <li><code>--web-dir PATH</code> — Set root directory for serving files</li>
                 <li><code>--workers-count N</code> — Set worker process count (must be >= 1)</li>
-                <li><code>--cache-enabled true|false</code> — Enable or disable <code>Cache-Control</code> response header</li>
             </ul>
             <p><strong>Environment Variables:</strong></p>
             <ul>
                 <li><code>BASE_WEB_DIR</code> — Environment variable for web root (used if <code>--web-dir</code> is not provided)</li>
                 <li><code>WORKERS_COUNT</code> — Environment variable for worker count (used if <code>--workers-count</code> is not provided)</li>
-                <li><code>CACHE_ENABLED=true|false</code> — Enable or disable <code>Cache-Control</code> response header</li>
             </ul>
             <p><strong>Precedence:</strong> CLI arguments override environment variables.</p>
 
