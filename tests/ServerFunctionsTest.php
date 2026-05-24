@@ -274,4 +274,170 @@ final class ServerFunctionsTest extends TestCase
             rmdir($tempDir);
         }
     }
+
+    public function test_range_request_returns_partial_content(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/video.bin';
+        $fullBody = '0123456789abcdefghijklmnopqrstuvwxyz';
+        file_put_contents($filePath, $fullBody);
+
+        try {
+            $requestContext = new HttpRequest(
+                'GET',
+                '/video.bin',
+                'GET /video.bin HTTP/1.1',
+                ['range' => 'bytes=5-9'],
+            );
+
+            $response = create_response($this->makeServerConfig($tempDir), $requestContext, 1);
+
+            $this->assertSame(HTTP_STATUS::PARTIAL_CONTENT, $response->status);
+            $this->assertSame('56789', $response->body);
+            $this->assertSame('bytes 5-9/' . strlen($fullBody), $response->headers['Content-Range']);
+            $this->assertSame(strlen($response->body), (int) $response->headers['Content-Length']);
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_unsatisfiable_range_request_returns_416(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/video.bin';
+        $fullBody = '0123456789';
+        file_put_contents($filePath, $fullBody);
+
+        try {
+            $requestContext = new HttpRequest(
+                'GET',
+                '/video.bin',
+                'GET /video.bin HTTP/1.1',
+                ['range' => 'bytes=100-200'],
+            );
+
+            $response = create_response($this->makeServerConfig($tempDir), $requestContext, 1);
+
+            $this->assertSame(HTTP_STATUS::RANGE_NOT_SATISFIABLE, $response->status);
+            $this->assertSame('', $response->body);
+            $this->assertSame('bytes */' . strlen($fullBody), $response->headers['Content-Range']);
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_range_request_ignores_gzip_and_returns_partial_identity_body(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/video.bin';
+        $fullBody = str_repeat('abcdefghij', 2000);
+        file_put_contents($filePath, $fullBody);
+
+        try {
+            $requestContext = new HttpRequest(
+                'GET',
+                '/video.bin',
+                'GET /video.bin HTTP/1.1',
+                [
+                    'range' => 'bytes=100-199',
+                    'accept-encoding' => 'gzip',
+                ],
+            );
+
+            $response = create_response($this->makeServerConfig($tempDir), $requestContext, 1);
+
+            $this->assertSame(HTTP_STATUS::PARTIAL_CONTENT, $response->status);
+            $this->assertSame(substr($fullBody, 100, 100), $response->body);
+            $this->assertArrayNotHasKey('Content-Encoding', $response->headers);
+            $this->assertSame('bytes 100-199/' . strlen($fullBody), $response->headers['Content-Range']);
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_large_html_falls_back_to_identity_without_precompressed_variant(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/large.html';
+
+        $stream = fopen($filePath, 'wb');
+        fwrite($stream, str_repeat('a', MAX_DYNAMIC_GZIP_BYTES + 1024));
+        fclose($stream);
+
+        try {
+            $response = resolve_file_response(
+                $tempDir,
+                '/large.html',
+                ['gzip'],
+            );
+
+            $this->assertSame(HTTP_STATUS::OK, $response->status);
+            $this->assertArrayNotHasKey('Content-Encoding', $response->headers);
+            $this->assertSame(str_repeat('a', MAX_DYNAMIC_GZIP_BYTES + 1024), $response->body);
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_large_html_uses_precompressed_gzip_when_available(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/large.html';
+        $largeHtml = str_repeat('a', MAX_DYNAMIC_GZIP_BYTES + 1024);
+
+        file_put_contents($filePath, $largeHtml);
+        file_put_contents($filePath . '.gz', gzencode($largeHtml));
+
+        try {
+            $response = resolve_file_response(
+                $tempDir,
+                '/large.html',
+                ['gzip'],
+            );
+
+            $this->assertSame(HTTP_STATUS::OK, $response->status);
+            $this->assertSame('gzip', $response->headers['Content-Encoding']);
+            $this->assertSame('Accept-Encoding', $response->headers['Vary']);
+            $this->assertSame($largeHtml, gzdecode($response->body));
+        } finally {
+            unlink($filePath);
+            unlink($filePath . '.gz');
+            rmdir($tempDir);
+        }
+    }
+
+    public function test_large_media_without_range_uses_auto_partial_content(): void
+    {
+        $tempDir = sys_get_temp_dir() . '/joojoo-test-' . uniqid('', true);
+        mkdir($tempDir);
+        $filePath = $tempDir . '/large.mp4';
+
+        $stream = fopen($filePath, 'wb');
+        fwrite($stream, str_repeat('m', AUTO_RANGE_MEDIA_THRESHOLD_BYTES + 1024));
+        fclose($stream);
+
+        try {
+            $response = resolve_file_response(
+                $tempDir,
+                '/large.mp4',
+                [],
+            );
+
+            $this->assertSame(HTTP_STATUS::PARTIAL_CONTENT, $response->status);
+            $this->assertArrayHasKey('Content-Range', $response->headers);
+            $this->assertSame(AUTO_RANGE_MEDIA_CHUNK_BYTES, strlen($response->body));
+        } finally {
+            unlink($filePath);
+            rmdir($tempDir);
+        }
+    }
 }

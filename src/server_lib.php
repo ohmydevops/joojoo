@@ -3,10 +3,14 @@
 declare(strict_types=1);
 
 define('HOST', '0.0.0.0');
-define('PORT', 8000);
+define('PORT', 8001);
 define('WORKER_COUNT', get_processor_cores_number() * 2);
 define('KEEP_ALIVE_TIMEOUT', 5);
 define('KEEP_ALIVE_MAX_REQUESTS', 100);
+define('MAX_DYNAMIC_GZIP_BYTES', 8 * 1024 * 1024); // equal to 8 MiB
+define('AUTO_RANGE_MEDIA_THRESHOLD_BYTES', 16 * 1024 * 1024);  // equal to 16 MiB
+define('AUTO_RANGE_MEDIA_CHUNK_BYTES', 2 * 1024 * 1024); // equal to 2 MiB
+define('MAX_RANGE_RESPONSE_BYTES', 2 * 1024 * 1024); // equal to 2 MiB
 
 const DEFAULT_RESPONSE_HEADERS = [
     'Server' => 'joojoo',
@@ -25,6 +29,12 @@ const HEADER_CACHE_CONTROL = 'Cache-Control';
 const HEADER_ETAG = 'ETag';
 const HEADER_ALLOW = 'Allow';
 const HEADER_VARY = 'Vary';
+const HEADER_ACCEPT_RANGES = 'Accept-Ranges';
+const HEADER_CONTENT_RANGE = 'Content-Range';
+const HEADER_SERVER = 'Server';
+const HEADER_ACCEPT_ENCODING = 'Accept-Encoding';
+const HEADER_IF_NONE_MATCH = 'If-None-Match';
+const HEADER_RANGE = 'Range';
 
 const CONNECTION_CLOSE = 'close';
 const CONNECTION_KEEP_ALIVE = 'Keep-Alive';
@@ -32,19 +42,23 @@ const CONNECTION_KEEP_ALIVE = 'Keep-Alive';
 enum HTTP_STATUS: string
 {
     case OK = '200';
+    case PARTIAL_CONTENT = '206';
     case NOT_MODIFIED = '304';
     case FORBIDDEN = '403';
     case NOT_FOUND = '404';
     case METHOD_NOT_ALLOWED = '405';
+    case RANGE_NOT_SATISFIABLE = '416';
 
     public function reason(): string
     {
         return match ($this) {
             self::OK => 'OK',
+            self::PARTIAL_CONTENT => 'Partial Content',
             self::NOT_MODIFIED => 'Not Modified',
             self::FORBIDDEN => 'Forbidden',
             self::NOT_FOUND => 'Not Found',
             self::METHOD_NOT_ALLOWED => 'Method Not Allowed',
+            self::RANGE_NOT_SATISFIABLE => 'Range Not Satisfiable',
         };
     }
 }
@@ -80,7 +94,7 @@ readonly class ServerConfig
     }
 }
 
-function run_server(ServerConfig $config, ?int $worker_count): void
+function run_server(ServerConfig $server_config, ?int $worker_count): void
 {
     $workers = [];
     $socket = socket_create(domain: AF_INET, type: SOCK_STREAM, protocol: SOL_TCP);
@@ -125,12 +139,12 @@ function run_server(ServerConfig $config, ?int $worker_count): void
 
         worker_process(
             socket: $socket,
-            config: $config
+            server_config: $server_config
         );
         exit(0);
     }
 
-    startup_logging($config->webDir, $workers);
+    startup_logging($server_config->webDir, $workers);
 
     foreach ($workers as $worker_pid) {
         $wait_status = 0;
@@ -138,31 +152,27 @@ function run_server(ServerConfig $config, ?int $worker_count): void
     }
 }
 
-function worker_process(
-    \Socket $socket,
-    ServerConfig $config
-): void {
+function worker_process(\Socket $socket, ServerConfig $server_config): void
+{
     while ($client = socket_accept($socket)) {
-        socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $config->keepAliveTimeout, 'usec' => 0]);
-        socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $config->keepAliveTimeout, 'usec' => 0]);
+        socket_set_option($client, SOL_SOCKET, SO_RCVTIMEO, ['sec' => $server_config->keepAliveTimeout, 'usec' => 0]);
+        socket_set_option($client, SOL_SOCKET, SO_SNDTIMEO, ['sec' => $server_config->keepAliveTimeout, 'usec' => 0]);
 
         handle_client_connection(
             client: $client,
-            config: $config
+            server_config: $server_config
         );
 
         socket_close($client);
     }
 }
 
-function handle_client_connection(
-    \Socket $client,
-    ServerConfig $config,
-): void {
+function handle_client_connection(\Socket $client, ServerConfig $server_config): void
+{
     $request_count = 0;
     $keep_connection_open = true;
 
-    while ($keep_connection_open && $request_count < $config->keepAliveMaxRequests) {
+    while ($keep_connection_open && $request_count < $server_config->keepAliveMaxRequests) {
         $raw_request = read_request($client);
         if ($raw_request === false || $raw_request === '') {
             break;
@@ -172,7 +182,7 @@ function handle_client_connection(
         $request = parse_request_context($raw_request);
 
         $response = create_response(
-            config: $config,
+            server_config: $server_config,
             request: $request,
             request_count: $request_count
         );
@@ -189,28 +199,23 @@ function handle_client_connection(
     }
 }
 
-function create_response(
-    ServerConfig $config,
-    HttpRequest $request,
-    int $request_count
-): HttpResponse {
+function create_response(ServerConfig $server_config, HttpRequest $request, int $request_count): HttpResponse
+{
     $accepted_encodings = parse_accepted_encodings($request->headers['accept-encoding'] ?? '');
     $client_etag = trim($request->headers['if-none-match'] ?? '');
+    $range_header = trim($request->headers['range'] ?? '');
 
     $resource_response = resolve_file_response(
-        $config->webDir,
-        $request->path,
-        $accepted_encodings,
-        $client_etag
+        web_dir: $server_config->webDir,
+        request_path: $request->path,
+        accepted_encodings: $accepted_encodings,
+        file_etag_sent_by_client: $client_etag,
+        range_header: $range_header
     );
 
     $response = match ($request->method) {
         HTTP_METHOD_GET => $resource_response,
-        HTTP_METHOD_HEAD => new HttpResponse(
-            $resource_response->status,
-            [...$resource_response->headers, HEADER_CONTENT_LENGTH => strlen($resource_response->body)],
-            ''
-        ),
+        HTTP_METHOD_HEAD => build_head_response($resource_response),
         default => handle_error_response(HTTP_STATUS::METHOD_NOT_ALLOWED, HTTP_METHODS_ALLOWED),
     };
 
@@ -218,17 +223,13 @@ function create_response(
         $response,
         $request,
         $request_count,
-        $config->keepAliveMaxRequests,
-        $config->keepAliveTimeout
+        $server_config->keepAliveMaxRequests,
+        $server_config->keepAliveTimeout
     );
 }
 
-function resolve_file_response(
-    string $web_dir,
-    string $request_path,
-    array $accepted_encodings,
-    string $file_etag_sent_by_client = ''
-): HttpResponse {
+function resolve_file_response(string $web_dir, string $request_path, array $accepted_encodings, string $file_etag_sent_by_client = '', string $range_header = ''): HttpResponse
+{
     if (is_forbidden_path($request_path)) {
         return handle_error_response(HTTP_STATUS::FORBIDDEN);
     }
@@ -241,10 +242,32 @@ function resolve_file_response(
 
     $headers = [...DEFAULT_RESPONSE_HEADERS];
     $headers[HEADER_CONTENT_TYPE] = get_content_type($file_path);
+    $headers[HEADER_ACCEPT_RANGES] = 'bytes';
+
+    $file_size = filesize($file_path) ?: 0;
+    $range = $range_header !== '' ? parse_byte_range($range_header, $file_size) : null;
+    $is_auto_range_media_request = $range === null
+        && $range_header === ''
+        && $file_size > AUTO_RANGE_MEDIA_THRESHOLD_BYTES
+        && is_streaming_media_content_type($headers[HEADER_CONTENT_TYPE]);
+
+    if ($is_auto_range_media_request && $file_size > 0) {
+        $range_end = min($file_size - 1, AUTO_RANGE_MEDIA_CHUNK_BYTES - 1);
+        $range = [0, $range_end];
+    }
+
+    if ($range === false) {
+        $headers[HEADER_CONTENT_RANGE] = 'bytes */' . $file_size;
+        return new HttpResponse(HTTP_STATUS::RANGE_NOT_SATISFIABLE, $headers, '');
+    }
+
+    $is_range_request = is_array($range);
 
     [$use_gzip_representation, $has_precompressed_file, $representation_key] = determine_representation(
         $accepted_encodings,
-        $file_path
+        $file_path,
+        $file_size,
+        ! $is_range_request
     );
 
     if ($use_gzip_representation) {
@@ -261,9 +284,126 @@ function resolve_file_response(
         return new HttpResponse(HTTP_STATUS::NOT_MODIFIED, $headers, '');
     }
 
+    if ($is_range_request) {
+        [$start, $end] = $range;
+        $max_end = min($file_size - 1, $start + MAX_RANGE_RESPONSE_BYTES - 1);
+        $end = min($end, $max_end);
+
+        $partial_body = load_file_range($file_path, $start, $end - $start + 1);
+
+        $headers[HEADER_CONTENT_RANGE] = "bytes $start-$end/$file_size";
+        $headers[HEADER_CONTENT_LENGTH] = strlen($partial_body);
+
+        return new HttpResponse(HTTP_STATUS::PARTIAL_CONTENT, $headers, $partial_body);
+    }
+
     $body = load_file_representation($file_path, $use_gzip_representation, $has_precompressed_file);
 
     return new HttpResponse(HTTP_STATUS::OK, $headers, $body);
+}
+
+function load_file_range(string $file_path, int $start, int $length): string
+{
+    $stream = fopen($file_path, 'rb');
+    if ($stream === false) {
+        return '';
+    }
+
+    if ($start > 0) {
+        fseek($stream, $start);
+    }
+
+    $body = '';
+    $remaining = $length;
+
+    while ($remaining > 0 && ! feof($stream)) {
+        $chunk = fread($stream, min(8192, $remaining));
+        if ($chunk === false || $chunk === '') {
+            break;
+        }
+
+        $body .= $chunk;
+        $remaining -= strlen($chunk);
+    }
+
+    fclose($stream);
+
+    return $body;
+}
+
+// array return for valid range
+// false return for unsatisfiable range
+// null return for invalid range header
+function parse_byte_range(string $range_header, int $body_length): array|false|null
+{
+    if (! str_starts_with($range_header, 'bytes=')) {
+        return null;
+    }
+
+    $range_spec = trim(substr($range_header, 6));
+    if ($range_spec === '' || str_contains($range_spec, ',')) {
+        return null;
+    }
+
+    if (! str_contains($range_spec, '-')) {
+        return null;
+    }
+
+    [$start_raw, $end_raw] = explode('-', $range_spec, 2);
+    $start_raw = trim($start_raw);
+    $end_raw = trim($end_raw);
+
+    if ($body_length <= 0) {
+        return false;
+    }
+
+    if ($start_raw === '') {
+        if ($end_raw === '' || ! ctype_digit($end_raw)) {
+            return null;
+        }
+
+        $suffix_length = (int) $end_raw;
+        if ($suffix_length <= 0) {
+            return false;
+        }
+
+        $suffix_length = min($suffix_length, $body_length);
+        return [$body_length - $suffix_length, $body_length - 1];
+    }
+
+    if (! ctype_digit($start_raw)) {
+        return null;
+    }
+
+    $start = (int) $start_raw;
+    if ($start >= $body_length) {
+        return false;
+    }
+
+    if ($end_raw === '') {
+        return [$start, $body_length - 1];
+    }
+
+    if (! ctype_digit($end_raw)) {
+        return null;
+    }
+
+    $end = (int) $end_raw;
+    if ($end < $start) {
+        return false;
+    }
+
+    $end = min($end, $body_length - 1);
+    return [$start, $end];
+}
+
+function build_head_response(HttpResponse $get_response): HttpResponse
+{
+    return new HttpResponse(
+        $get_response->status,
+        [...$get_response->headers, HEADER_CONTENT_LENGTH => strlen($get_response->body)],
+        ''
+    );
 }
 
 /**
@@ -380,13 +520,8 @@ function handle_error_response(HTTP_STATUS $status, array $allowed_methods = [])
     return new HttpResponse($status, $headers, $body);
 }
 
-function apply_connection_headers(
-    HttpResponse $response,
-    HttpRequest $request,
-    int $request_count,
-    int $keep_alive_max_requests,
-    int $keep_alive_timeout
-): HttpResponse {
+function apply_connection_headers(HttpResponse $response, HttpRequest $request, int $request_count, int $keep_alive_max_requests, int $keep_alive_timeout): HttpResponse
+{
     $close_connection = ! is_client_keepalive($request) || $request_count >= $keep_alive_max_requests;
 
     if ($close_connection) {
@@ -459,12 +594,13 @@ function is_etag_match(string $if_none_match_header, string $current_etag): bool
     return false;
 }
 
-function determine_representation(array $accepted_encodings, string $file_path): array
+function determine_representation(array $accepted_encodings, string $file_path, int $file_size, bool $allow_gzip = true): array
 {
-    $client_accepts_gzip = in_array('gzip', $accepted_encodings, true);
+    $client_accepts_gzip = $allow_gzip && in_array('gzip', $accepted_encodings, true);
     $has_precompressed_file = is_readable($file_path . '.gz');
+    $can_use_dynamic_gzip = $file_size <= MAX_DYNAMIC_GZIP_BYTES;
 
-    $use_gzip_representation = $client_accepts_gzip;
+    $use_gzip_representation = $client_accepts_gzip && ($has_precompressed_file || $can_use_dynamic_gzip);
     $representation_key = 'identity';
 
     if ($use_gzip_representation) {
@@ -511,6 +647,11 @@ function load_file_representation(string $file_path, bool $use_gzip_representati
     }
 
     return file_get_contents($file_path);
+}
+
+function is_streaming_media_content_type(string $content_type): bool
+{
+    return str_starts_with($content_type, 'video/') || str_starts_with($content_type, 'audio/');
 }
 
 function get_content_type(string $file_path): string

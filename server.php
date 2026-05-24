@@ -13,13 +13,13 @@ if ($config['show_help']) {
     exit(0);
 }
 
-$serverConfig = new ServerConfig(
+$server_config = new ServerConfig(
     webDir: $config['web_dir'],
     keepAliveMaxRequests: KEEP_ALIVE_MAX_REQUESTS,
     keepAliveTimeout: KEEP_ALIVE_TIMEOUT,
 );
 
 run_server(
-    config: $serverConfig,
-    worker_count:$config['worker_count']
+    server_config: $server_config,
+    worker_count: $config['worker_count']
 );
