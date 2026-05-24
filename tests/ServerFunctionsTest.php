@@ -26,7 +26,7 @@ final class ServerFunctionsTest extends TestCase
     {
         $request = new HttpRequest('GET', '/docs/index.html', 'GET /docs/index.html HTTP/1.1', []);
 
-        $result = create_response(dirname(__DIR__), $request, 100, 100, 5, false);
+        $result = create_response(dirname(__DIR__), $request, 100, 100, 5);
 
         $this->assertSame('close', $result->headers['Connection']);
     }
@@ -35,7 +35,7 @@ final class ServerFunctionsTest extends TestCase
     {
         $request = new HttpRequest('HEAD', '/docs/index.html', 'HEAD /docs/index.html HTTP/1.1', []);
 
-        $response = create_response(dirname(__DIR__), $request, 1, 100, 5, false);
+        $response = create_response(dirname(__DIR__), $request, 1, 100, 5);
 
         $this->assertSame(HTTP_STATUS::OK, $response->status);
         $this->assertSame('', $response->body);
@@ -197,7 +197,7 @@ final class ServerFunctionsTest extends TestCase
                 ['if-none-match' => $initialResponse->headers['ETag']],
             );
 
-            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
@@ -223,7 +223,7 @@ final class ServerFunctionsTest extends TestCase
                 ['if-none-match' => '*'],
             );
 
-            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
@@ -255,7 +255,7 @@ final class ServerFunctionsTest extends TestCase
                 ['if-none-match' => '"non-match", W/' . $initialResponse->headers['ETag']],
             );
 
-            $response = create_response($tempDir, $requestContext, 1, 100, 5, false);
+            $response = create_response($tempDir, $requestContext, 1, 100, 5);
 
             $this->assertSame(HTTP_STATUS::NOT_MODIFIED, $response->status);
             $this->assertSame('', $response->body);
