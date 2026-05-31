@@ -82,6 +82,11 @@ readonly class ServerConfig
 
 function run_server(ServerConfig $config, ?int $worker_count): void
 {
+    if (PHP_OS_FAMILY === 'Windows') {
+        logging('Joojoo supports only macOS and Linux. Windows is not supported.');
+        exit(1);
+    }
+
     $workers = [];
     $socket = socket_create(domain: AF_INET, type: SOCK_STREAM, protocol: SOL_TCP);
 
